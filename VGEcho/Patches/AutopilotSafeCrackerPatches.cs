@@ -45,6 +45,10 @@ internal static class AutopilotSafeCrackerPatches
         if (ActivatedAbility.targetingActive) return;
 
         float now = Time.time;
+        // Self-healing throttle: if _nextScanTime survived a scene reload (Time.time
+        // reset but the static field didn't), reset it so scanning resumes immediately
+        // instead of waiting for real-time to catch up.
+        if (_nextScanTime > now + ScanInterval) _nextScanTime = 0f;
         if (now < _nextScanTime) return;
         _nextScanTime = now + ScanInterval;
 

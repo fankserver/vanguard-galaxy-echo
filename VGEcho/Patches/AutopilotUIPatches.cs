@@ -379,10 +379,15 @@ internal static class AutopilotUIPatches
             return;
         }
 
-        var range = (AcceptableValueRange<float>)config.Description.AcceptableValues!;
-        slider.minValue = range.MinValue;
-        slider.maxValue = range.MaxValue;
-        slider.wholeNumbers = true;
+        // Safe-cast: if AcceptableValues is null or somehow a different type (e.g.
+        // a game update swapped the config description), fall through with the
+        // vanilla slider's existing min/max rather than crashing the panel.
+        if (config.Description.AcceptableValues is AcceptableValueRange<float> range)
+        {
+            slider.minValue = range.MinValue;
+            slider.maxValue = range.MaxValue;
+            slider.wholeNumbers = true;
+        }
 
         // Scrub the slider's onValueChanged (vanilla has it wired to ammo logic).
         ScrubUnityEvent(slider.onValueChanged);
