@@ -8,6 +8,7 @@ A BepInEx plugin for [Vanguard Galaxy](https://store.steampowered.com/app/347180
 - **Refinery routing** *(opt-in)* — when the autopilot would fly home with ore in cargo and home has no refinery, divert to the nearest friendly station with one. Saves the round-trip when mining far from base.
 - **Auto-refine on arrival** *(opt-in)* — when the autopilot docks at a station with a refinery, flip that refinery's Auto-Refine toggle on so pending ore refines passively while you're there.
 - **Auto LB-RTR** *(opt-in)* — while autopilot is engaged, auto-fire the LB-RTR Bot salvage ability at the closest in-range wreck whenever it's off cooldown. Same cooldown, same payload, no manual targeting — effectively turns the activated ability into a triggered one for the duration of autopilot.
+- **Auto Crackshot Drone** *(opt-in)* — while autopilot is engaged, auto-fire the Crackshot Drone mining ability at the closest in-range asteroid with surface ore. Same cooldown, same payload, no manual targeting — effectively turns the mining activated ability into a triggered one for the duration of autopilot.
 
 ETA-sync, Arrival-snap, and Stack-deposit don't change *what* ECHO decides — they fix UI lies, residual waits, and a per-tick architecture artifact respectively. The opt-in toggles change routing, station behavior, or ability casting; they default off so existing installs stay on vanilla decisions.
 
@@ -59,6 +60,8 @@ Mastery accrues automatically — every autopilot tick grants 10 XP to the autop
 | `AutoRefine`       | `false` | On autopilot arrival at a station with a refinery, enable that refinery's Auto-Refine toggle. Setting sticks per-station.                                                                     |
 | `AutoLbrtr`        | `false` | While autopilot is engaged, auto-fire the equipped LB-RTR Bot salvage ability at the closest in-range wreck with salvage whenever it comes off cooldown. Skipped while you're mid-manual-cast. Independent of `TimingEnabled`. |
 | `AutoLbrtrRange`   | `80`    | Max distance (world units) from the player ship to scan for wrecks when `AutoLbrtr` is enabled. Accepts `20`–`500`. Tune up if the drone reliably reaches farther wrecks before its duration expires; down if it keeps falling short. |
+| `AutoSafeCracker`  | `false` | While autopilot is engaged, auto-fire the equipped Crackshot Drone mining ability at the closest in-range asteroid with surface ore whenever it comes off cooldown. Skipped while you're mid-manual-cast. Independent of `TimingEnabled`. |
+| `AutoSafeCrackerRange` | `80` | Max distance (world units) from the player ship to scan for asteroids when `AutoSafeCracker` is enabled. Accepts `20`–`500`. Tune up if the drone reliably reaches farther asteroids before its duration expires; down if it keeps falling short. |
 
 Disable any feature independently — no rebuild needed, just relaunch the game. The three default-on toggles fix UI/architecture issues without bypassing skill-tree progression; the opt-in toggles change what ECHO decides or casts on your behalf, not just how it executes.
 
