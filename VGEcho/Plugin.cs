@@ -28,6 +28,8 @@ public class Plugin : BaseUnityPlugin
     internal ConfigEntry<bool> CfgAutopilotAutoRefine = null!;
     internal ConfigEntry<bool> CfgAutopilotAutoLbrtr = null!;
     internal ConfigEntry<float> CfgAutopilotAutoLbrtrRange = null!;
+    internal ConfigEntry<bool> CfgAutopilotAutoSafeCracker = null!;
+    internal ConfigEntry<float> CfgAutopilotAutoSafeCrackerRange = null!;
 
     private Harmony _harmony = null!;
 
@@ -102,6 +104,19 @@ public class Plugin : BaseUnityPlugin
                 "AutoLbrtr is enabled. Tune up if the drone reliably reaches further wrecks " +
                 "before its duration expires; down if it keeps falling short.",
                 new AcceptableValueRange<float>(20f, 500f)));
+        CfgAutopilotAutoSafeCracker = Config.Bind("Autopilot", "AutoSafeCracker", false,
+            "When ECHO autopilot is engaged and the Crackshot Drone mining ability is " +
+            "equipped and off cooldown, auto-fire it at the closest asteroid within " +
+            "AutoSafeCrackerRange that still has surface ore. Effectively turns the " +
+            "activated ability into a triggered one for the duration of autopilot -- same " +
+            "cooldown, same payload, no manual targeting. Skipped while you're mid-manual-cast. " +
+            "Beyond VGEcho's default 'fix UI/timing' scope, so opt-in.");
+        CfgAutopilotAutoSafeCrackerRange = Config.Bind("Autopilot", "AutoSafeCrackerRange", 80f,
+            new ConfigDescription(
+                "Maximum distance (world units) from the player ship to scan for asteroids " +
+                "when AutoSafeCracker is enabled. Tune up if the drone reliably reaches " +
+                "further asteroids before its duration expires; down if it keeps falling short.",
+                new AcceptableValueRange<float>(20f, 500f)));
 
         _harmony = new Harmony(PluginGuid);
         _harmony.PatchAll(typeof(Patches.AutopilotTimingPatches));
@@ -109,6 +124,7 @@ public class Plugin : BaseUnityPlugin
         _harmony.PatchAll(typeof(Patches.AutopilotRefineryPatches));
         _harmony.PatchAll(typeof(Patches.AutopilotUIPatches));
         _harmony.PatchAll(typeof(Patches.AutopilotLbrtrPatches));
+        _harmony.PatchAll(typeof(Patches.AutopilotSafeCrackerPatches));
         Log.LogInfo($"{PluginName} v{PluginVersion} loaded ({_harmony.GetPatchedMethods().Count()} patches)");
     }
 

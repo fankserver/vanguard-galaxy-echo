@@ -17,9 +17,12 @@ namespace VGEcho.Patches;
 /// Runtime UI injection for the Autopilot side-tab. On each <see cref="Autopilot"/>
 /// <c>Awake</c>, appends an "Echo" section to the scroll-view content list — a
 /// header (cloned from the vanilla "Economy" header for matching styling) followed
-/// by our opt-in toggles, each cloned from the "Auto sell" row and bound to a
-/// BepInEx config entry: <c>AutoRefine</c> ("Auto-refine on dock") and
-/// <c>RefineryRoute</c> ("Divert to refinery").
+/// by our opt-in toggles and sliders, each cloned from a vanilla template row and
+/// bound to the corresponding BepInEx config entry.
+///
+/// Toggle rows are cloned from the "Auto sell" toggle row; slider rows are cloned
+/// from the "Ammo Supply" slider row — both ship with the Autopilot prefab, so
+/// they're guaranteed to exist and match the panel's visual theme exactly.
 ///
 /// The content list (<c>ScrollView/Viewport/Content</c>) stacks its children via a
 /// layout group, so placement is purely sibling-order: we append and let the layout
@@ -58,8 +61,31 @@ internal static class AutopilotUIPatches
         "If enabled, #ECHO# will divert to the nearest station with a #refinery# when cargo " +
         "contains #ore# instead of returning to the #Home Station#.";
 
+    private const string AutoSafeCrackerRowName = "vgecho_autoSafeCrackerRow";
+    private const string AutoSafeCrackerLabel = "Auto Crackshot Drone";
+    private const string AutoSafeCrackerTooltip =
+        "If enabled, #ECHO# will auto-fire the #Crackshot Drone# at the closest #asteroid# " +
+        "with surface ore while autopilot is engaged. Same cooldown, same payload, no manual " +
+        "#targeting#.";
+
+    private const string AutoLbrtrRowName = "vgecho_autoLbrtrRow";
+    private const string AutoLbrtrLabel = "Auto LB-RTR Bot";
+    private const string AutoLbrtrTooltip =
+        "If enabled, #ECHO# will auto-fire the #LB-RTR Bot# at the closest #wreck# with salvage " +
+        "while autopilot is engaged. Same cooldown, same payload, no manual #targeting#.";
+
+    private const string AutoLbrtrRangeRowName = "vgecho_autoLbrtrRangeRow";
+    private const string AutoLbrtrRangeLabel = "LB-RTR range";
+    private const string AutoSafeCrackerRangeRowName = "vgecho_autoSafeCrackerRangeRow";
+    private const string AutoSafeCrackerRangeLabel = "Crackshot range";
+
+    // Accessed via reflection because the shipping game DLL may keep these fields
+    // non-public even though the publicized stub makes them appear public.
     private static readonly AccessTools.FieldRef<Autopilot, Toggle> AutoSellToggleRef =
         AccessTools.FieldRefAccess<Autopilot, Toggle>("autoSellToggle");
+
+    private static readonly AccessTools.FieldRef<Autopilot, Slider> AmmoSliderRef =
+        AccessTools.FieldRefAccess<Autopilot, Slider>("ammoMinutesSlider");
 
     // UnityEventBase internals for scrubbing persistent (prefab-serialised)
     // listeners. Cached on first use.
@@ -115,7 +141,20 @@ internal static class AutopilotUIPatches
         // Idempotency: our section header marks a completed injection.
         if (container.Find(EchoHeaderName) != null) return;
 
-        // Our own "Echo" section header, then the toggles grouped beneath it —
+        // Locate the ammo slider row (template for our sliders).
+        var ammoSlider = AmmoSliderRef(panel);
+        Transform? ammoSliderRow = null;
+        if (ammoSlider != null)
+        {
+            ammoSliderRow = ammoSlider.transform.parent;
+            // The slider may have the same parent-ascent pattern as the toggle.
+            if (ammoSliderRow != null && ammoSliderRow.GetComponent<Slider>() != null && ammoSliderRow.parent != null)
+            {
+                ammoSliderRow = ammoSliderRow.parent;
+            }
+        }
+
+        // Our own "Echo" section header, then the toggles/sliders grouped beneath it —
         // mirroring the vanilla General / Activities / Economy / Crew sections.
         InjectSectionHeader(container, EchoHeaderLabel);
 
@@ -124,6 +163,20 @@ internal static class AutopilotUIPatches
             AutoRefineLabel, AutoRefineTooltip, cfg.CfgAutopilotAutoRefine);
         InjectRow(container, sourceRow, RefineryRouteRowName,
             RefineryRouteLabel, RefineryRouteTooltip, cfg.CfgAutopilotRefineryRoute);
+        InjectRow(container, sourceRow, AutoLbrtrRowName,
+            AutoLbrtrLabel, AutoLbrtrTooltip, cfg.CfgAutopilotAutoLbrtr);
+        if (ammoSliderRow != null)
+        {
+            InjectSliderRow(container, ammoSliderRow, AutoLbrtrRangeRowName,
+                AutoLbrtrRangeLabel, cfg.CfgAutopilotAutoLbrtrRange);
+        }
+        InjectRow(container, sourceRow, AutoSafeCrackerRowName,
+            AutoSafeCrackerLabel, AutoSafeCrackerTooltip, cfg.CfgAutopilotAutoSafeCracker);
+        if (ammoSliderRow != null)
+        {
+            InjectSliderRow(container, ammoSliderRow, AutoSafeCrackerRangeRowName,
+                AutoSafeCrackerRangeLabel, cfg.CfgAutopilotAutoSafeCrackerRange);
+        }
     }
 
     /// <summary>
@@ -265,6 +318,90 @@ internal static class AutopilotUIPatches
         {
             if (getValue() == isOn) return;
             setValue(isOn);
+            Plugin.Instance.Config.Save();
+        });
+    }
+
+    /// <summary>
+    /// Inject a slider row for a <see cref="ConfigEntry{float}"/> into the autopilot
+    /// side-tab. Clones the vanilla "Ammo Supply" slider row (whose parent is
+    /// <paramref name="ammoSliderRow"/>) for consistent styling, then retargets the
+    /// label, slider binding, and value display to the supplied config entry.
+    /// </summary>
+    private static void InjectSliderRow(Transform container, Transform ammoSliderRow,
+        string cloneName, string labelText, ConfigEntry<float> config)
+    {
+        if (container.Find(cloneName) != null) return;
+
+        var cloneGO = UnityEngine.Object.Instantiate(ammoSliderRow.gameObject, container);
+        cloneGO.name = cloneName;
+        cloneGO.transform.SetAsLastSibling();
+
+        // Strip Translatables so they can't revert our labels.
+        foreach (var translatable in cloneGO.GetComponentsInChildren<Behaviour.Util.Translatable>(includeInactive: true))
+        {
+            UnityEngine.Object.Destroy(translatable);
+        }
+        // Strip TooltipSources — slider rows don't need tooltips.
+        foreach (var tooltip in cloneGO.GetComponentsInChildren<TooltipSource>(includeInactive: true))
+        {
+            UnityEngine.Object.Destroy(tooltip);
+        }
+
+        // Retarget the label: find the first non-empty TMP_Text. The ammo slider
+        // has one short numeric text (the value) and one longer descriptive text
+        // (the label). Heuristic: length ≤ 4 and starts with a digit → value.
+        var allTexts = cloneGO.GetComponentsInChildren<TMP_Text>(includeInactive: true);
+        TMP_Text? labelTextComp = null;
+        TMP_Text? valueTextComp = null;
+        foreach (var t in allTexts)
+        {
+            if (!string.IsNullOrEmpty(t.text) && t.text.Length <= 4 && char.IsDigit(t.text[0]))
+            {
+                valueTextComp = t;
+            }
+            else if (!string.IsNullOrEmpty(t.text))
+            {
+                labelTextComp = t;
+            }
+        }
+        if (labelTextComp != null)
+        {
+            labelTextComp.text = labelText;
+        }
+
+        // Retarget the slider.
+        var slider = cloneGO.GetComponentInChildren<Slider>(includeInactive: true);
+        if (slider == null)
+        {
+            Plugin.Log.LogWarning($"[autopilot-ui] cloned slider row '{cloneName}' has no Slider; aborting");
+            UnityEngine.Object.Destroy(cloneGO);
+            return;
+        }
+
+        // Safe-cast: if AcceptableValues is null or somehow a different type (e.g.
+        // a game update swapped the config description), fall through with the
+        // vanilla slider's existing min/max rather than crashing the panel.
+        if (config.Description.AcceptableValues is AcceptableValueRange<float> range)
+        {
+            slider.minValue = range.MinValue;
+            slider.maxValue = range.MaxValue;
+            slider.wholeNumbers = true;
+        }
+
+        // Scrub the slider's onValueChanged (vanilla has it wired to ammo logic).
+        ScrubUnityEvent(slider.onValueChanged);
+
+        slider.SetValueWithoutNotify(config.Value);
+        if (valueTextComp != null)
+        {
+            valueTextComp.text = config.Value.ToString("F0");
+        }
+
+        slider.onValueChanged.AddListener(val =>
+        {
+            config.Value = val;
+            if (valueTextComp != null) valueTextComp.text = val.ToString("F0");
             Plugin.Instance.Config.Save();
         });
     }
