@@ -12,7 +12,14 @@ PLUGIN_DIR := $(GAME_DIR)/BepInEx/plugins/VGEcho
 # Resolve dotnet — prefer explicit local SDK, fall back to PATH
 DOTNET   ?= $(shell command -v dotnet 2>/dev/null || echo /tmp/dnsdk/dotnet/dotnet)
 
-.PHONY: all build link-asm clean deploy check-bepinex
+COMPAT_TESTS := VGEcho.Compatibility.Tests/VGEcho.Compatibility.Tests.csproj
+
+# VGEcho.Compatibility.Tests targets net8.0, but dev boxes and CI often carry
+# only a newer runtime. LatestMajor lets the host roll forward instead of
+# pinning an SDK.
+export DOTNET_ROLL_FORWARD := LatestMajor
+
+.PHONY: all build compat-test compat-check-bindings link-asm clean deploy check-bepinex
 
 all: build
 
@@ -34,6 +41,21 @@ link-asm:
 build: link-asm
 	DOTNET_ROOT=$(dir $(DOTNET)) $(DOTNET) build VGEcho/VGEcho.csproj -c $(CONFIG)
 
+# Game-compatibility regression suite: the linked native-Remove binding helper
+# exercised against synthetic inventories, plus Cecil metadata/IL checks over
+# the freshly built plugin. Needs no game install and no BepInEx.
+compat-test: build
+	VGECHO_ASSEMBLY="$(abspath $(BUILDDLL))" DOTNET_ROOT=$(dir $(DOTNET)) \
+		$(DOTNET) test $(COMPAT_TESTS) -c $(CONFIG) --filter 'Category!=InstalledGame'
+
+# Signature checks against the ORIGINAL installed game assembly, read as
+# metadata only. Requires a local install; not runnable in public CI.
+compat-check-bindings: build
+	VGECHO_ASSEMBLY="$(abspath $(BUILDDLL))" \
+	VG_GAME_ASSEMBLY="$(GAME_DIR)/VanguardGalaxy_Data/Managed/Assembly-CSharp.dll" \
+	DOTNET_ROOT=$(dir $(DOTNET)) \
+		$(DOTNET) test $(COMPAT_TESTS) -c $(CONFIG) --filter 'Category=InstalledGame'
+
 deploy: build check-bepinex
 	@mkdir -p "$(PLUGIN_DIR)"
 	cp "$(BUILDDLL)" "$(PLUGIN_DIR)/"
@@ -42,4 +64,4 @@ deploy: build check-bepinex
 
 clean:
 	$(DOTNET) clean VGEcho/VGEcho.csproj
-	rm -rf VGEcho/bin VGEcho/obj
+	rm -rf VGEcho/bin VGEcho/obj VGEcho.Compatibility.Tests/bin VGEcho.Compatibility.Tests/obj

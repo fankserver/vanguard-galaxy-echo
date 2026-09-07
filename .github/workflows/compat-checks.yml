@@ -1,0 +1,53 @@
+name: Compatibility checks
+
+# Asset-free build + game-compatibility regression suite. Compiles VGEcho.dll
+# against the publicized stubs committed at VGEcho/lib/ and runs
+# VGEcho.Compatibility.Tests: the linked native-Remove binding helper against
+# synthetic inventories, plus Cecil metadata/IL checks over the freshly built
+# DLL. Nothing here loads Unity, BepInEx or the game.
+#
+# The checks that read the ORIGINAL installed Assembly-CSharp.dll are tagged
+# Category=InstalledGame and stay local — `make compat-check-bindings`.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: compat-checks-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  compat:
+    name: Compatibility (${{ matrix.configuration }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        configuration: [Debug, Release]
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v6
+        with:
+          # Same SDK the release workflow packages with. VGEcho targets
+          # netstandard2.1, VGEcho.Compatibility.Tests targets net8.0.
+          dotnet-version: '8.0.x'
+
+      - name: Verify publicized references are committed
+        run: |
+          for stub in Assembly-CSharp.dll UnityEngine.UI.dll Unity.TextMeshPro.dll; do
+            test -s "VGEcho/lib/$stub" || { echo "::error::VGEcho/lib/$stub is missing or empty."; exit 1; }
+          done
+
+      - name: Build and run compatibility tests
+        run: make compat-test CONFIG=${{ matrix.configuration }}
