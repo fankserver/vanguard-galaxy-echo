@@ -182,8 +182,18 @@ public class Plugin : BaseUnityPlugin
             return;
         }
 
-        if (_arrivalSnap == null) Log.LogWarning(ArrivalSnapBinding.Explain(admission));
-        else Log.LogInfo("Autopilot arrival-snap bound to VGModAPI " + apiVersion + " travel events.");
+        if (_arrivalSnap != null)
+        {
+            Log.LogInfo("Autopilot arrival-snap bound to VGModAPI " + apiVersion + " travel events.");
+        }
+        else if (ArrivalSnapBinding.LevelFor(admission) == ArrivalSnapLogLevel.Info)
+        {
+            Log.LogInfo(ArrivalSnapBinding.Explain(admission));
+        }
+        else
+        {
+            Log.LogWarning(ArrivalSnapBinding.Explain(admission));
+        }
     }
 
     /// <summary>Version of the installed VGModAPI plugin, or null when it is not

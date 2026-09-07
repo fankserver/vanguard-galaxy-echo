@@ -32,6 +32,7 @@
     <Compile Include="..\VGEcho\Travel\ArrivalSnapFacts.cs" Link="Core\ArrivalSnapFacts.cs" />
     <Compile Include="..\VGEcho\Travel\ArrivalSnapReducer.cs" Link="Core\ArrivalSnapReducer.cs" />
     <Compile Include="..\VGEcho\Travel\ArrivalSnapBinding.cs" Link="Core\ArrivalSnapBinding.cs" />
+    <Compile Include="..\VGEcho\Travel\ArrivalSnapApplyGuard.cs" Link="Core\ArrivalSnapApplyGuard.cs" />
     <Compile Include="..\VGEcho\Travel\IArrivalSnapObserver.cs" Link="Core\IArrivalSnapObserver.cs" />
     <Compile Include="..\VGEcho\Travel\TravelArrivalObserver.cs" Link="Core\TravelArrivalObserver.cs" />
   </ItemGroup>

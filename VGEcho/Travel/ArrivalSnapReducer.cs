@@ -17,8 +17,11 @@ namespace VGEcho.Travel;
 /// same native method and emits only when
 /// <c>WaypointCount(player) == 0 &amp;&amp; !TravelActive(travelManager)</c>,
 /// additionally requiring a verified arrival to attribute the completion to.
-/// So this reducer does not re-read native travel state; it decides ownership,
-/// once-only delivery and Echo's own gates.</para>
+/// So this reducer decides ownership, once-only delivery and Echo's own gates,
+/// and leaves the native state alone. It is not the last word: because the hub
+/// dispatches subscribers synchronously, a subscriber ahead of Echo can start a
+/// new route before Echo's callback runs, so the timer WRITE re-reads both
+/// native conditions through <see cref="ArrivalSnapApplyGuard"/>.</para>
 ///
 /// <para>Only <see cref="TravelFactKind.RouteCompleted"/> can snap. Initial and
 /// recovered placement (load / first verified position), requests,
@@ -28,8 +31,9 @@ namespace VGEcho.Travel;
 ///
 /// <para>There is no pending or deferred state by design. The API dispatches
 /// synchronously from inside the native boundary, at the instant Echo's own
-/// postfix used to run, so a snap either applies now or not at all; nothing can
-/// be resurrected at a later idle tick.</para>
+/// postfix used to run, and the write-time guard re-confirms the world there, so
+/// a snap either applies now or not at all; nothing can be resurrected at a
+/// later idle tick.</para>
 /// </summary>
 internal sealed class ArrivalSnapReducer
 {

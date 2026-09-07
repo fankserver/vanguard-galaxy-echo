@@ -71,9 +71,18 @@ internal static class AutopilotTimingPatches
     /// zeroed timer is observed by the next frame's idle decision exactly as
     /// before.</para>
     ///
+    /// <para>The two native conditions the retired postfix checked at WRITE time
+    /// — an empty <c>waypoints</c> list and the full <c>TravelActive()</c>,
+    /// which also reports true for an in-flight jump-gate hop — are re-read here
+    /// rather than trusted from the fact. The API validates them when it emits,
+    /// but its hub dispatches subscribers synchronously, so a subscriber ahead
+    /// of Echo can start a new route inside the same callback chain.
+    /// <see cref="Travel.ArrivalSnapApplyGuard"/> owns that decision so both
+    /// gates are unit-tested; everything unreadable fails closed.</para>
+    ///
     /// <para><see cref="Singleton{T}.Current"/>, not <c>Instance</c>: the latter
     /// runs <c>FindAnyObjectByType</c> and caches the result into the shared
-    /// static when the field is empty. A pure read of the manager the game
+    /// static when the field is empty. A pure read of the managers the game
     /// already registered is enough here, and it cannot seed that cache with an
     /// object found during a scene transition. A missing or destroyed manager
     /// (Unity fake-null) simply leaves the vanilla cycle running.</para>
@@ -81,14 +90,27 @@ internal static class AutopilotTimingPatches
     internal static void ApplyArrivalSnap()
     {
         var idle = Singleton<IdleManager>.Current;
-        if (idle == null)
+        var player = GamePlayer.current;
+        var travel = Singleton<TravelManager>.Current;
+        var waypoints = player != null ? player.waypoints : null;
+
+        var decision = Travel.ArrivalSnapApplyGuard.Evaluate(new Travel.NativeTravelState(
+            idleManagerLive: idle != null,
+            playerLive: player != null,
+            travelManagerLive: travel != null,
+            remainingWaypoints: waypoints != null ? waypoints.Count : -1,
+            travelActive: travel != null && travel.TravelActive()));
+
+        if (decision != Travel.ArrivalSnapApply.WriteTimer)
         {
-            Plugin.Log.LogDebug("[autopilot-timing] arrival-snap: no live IdleManager; vanilla cycle unchanged");
+            Plugin.Log.LogDebug("[autopilot-timing] arrival-snap skipped at write time: " + decision);
             return;
         }
 
         Plugin.Log.LogDebug("[autopilot-timing] arrival-snap: zeroing updateTimer");
-        UpdateTimerRef(idle) = 0f;
+        // WriteTimer is only returned for IdleManagerLive, which is this very
+        // reference having passed Unity's null operator above.
+        UpdateTimerRef(idle!) = 0f;
     }
 
     /// <summary>

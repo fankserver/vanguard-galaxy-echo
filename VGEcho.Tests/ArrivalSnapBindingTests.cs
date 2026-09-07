@@ -56,6 +56,20 @@ public sealed class ArrivalSnapBindingTests
         => Assert.Equal(ArrivalSnapAdmission.CapabilityUnavailable,
             ArrivalSnapBinding.Evaluate(ArrivalSnapBinding.MinimumApiVersion, true, false));
 
+    /// <summary>A missing optional dependency is the documented degraded state
+    /// and must not be reported as a problem; every other refusal means the API
+    /// is installed but unusable, which is.</summary>
+    [Fact]
+    public void OnlyTheAbsentApiIsReportedAtInfoLevel()
+    {
+        Assert.Equal(ArrivalSnapLogLevel.Info, ArrivalSnapBinding.LevelFor(ArrivalSnapAdmission.ApiAbsent));
+        foreach (ArrivalSnapAdmission admission in Enum.GetValues(typeof(ArrivalSnapAdmission)))
+        {
+            if (admission is ArrivalSnapAdmission.ApiAbsent or ArrivalSnapAdmission.Admitted) continue;
+            Assert.Equal(ArrivalSnapLogLevel.Warning, ArrivalSnapBinding.LevelFor(admission));
+        }
+    }
+
     [Fact]
     public void EveryRefusalStatesThatOnlyArrivalSnapIsLostAndThereIsNoFallback()
     {

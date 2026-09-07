@@ -28,9 +28,16 @@ if (_bindings.WaypointCount(player) == 0 && !_bindings.TravelActive(travelManage
 and only for a leg the adapter has already recorded a *verified arrival* for
 (`_lastCompleted`), in the API's current session, for a live bound player, and at
 most once per leg (`_routeCompleted`). So the API's precondition is the old guard
-plus arrival attribution and session ownership. VGEcho does not re-read native
-travel state; `InstalledGameMetadataTests` pins the native shapes those claims
-depend on.
+plus arrival attribution and session ownership.
+
+That precondition is checked when the fact is **emitted**, which is not the same
+instant as when Echo **writes**. The hub delivers subscribers synchronously in
+subscription order, so a subscriber registered ahead of Echo can start a new
+route from inside the same callback chain; Echo would then zero the cycle timer
+with a leg already running and the next idle tick would decide mid-route. So the
+timer write re-reads both native conditions itself, exactly as the retired
+postfix did — see [Write-time guard](#write-time-guard) below.
+`InstalledGameMetadataTests` pins the native shapes all of these claims depend on.
 
 ## Frame ordering
 
@@ -62,15 +69,48 @@ native call, in the coroutine phase of frame *N* — after every `Update` of fra
 *N+1*, which drives it negative and calls `FindActivity`. That is the same frame
 the retired postfix produced.
 
-Because the fact cannot be delivered before those conditions hold, there is **no
-pending or deferred snap** and no lease to expire: the callback either snaps now
-or does nothing. Nothing can be resurrected at a later idle tick.
+Because the fact cannot be delivered before those conditions hold, and because
+the write re-confirms them, there is **no pending or deferred snap** and no lease
+to expire: the callback either writes now or does nothing. Nothing can be
+resurrected at a later idle tick.
 
-If the manager is not live at that moment, `Singleton<IdleManager>.Current` is
-null (Unity fake-null included) and the vanilla cycle simply runs. `Current` is
-a pure read of the already-registered singleton; `Instance` would run
-`FindAnyObjectByType` and write the shared static cache, which an observer has
-no business doing.
+## Write-time guard
+
+`AutopilotTimingPatches.ApplyArrivalSnap` snapshots the live native state and
+hands it to the pure `ArrivalSnapApplyGuard.Evaluate`, writing the timer only on
+`WriteTimer`:
+
+| Snapshot | Decision |
+|---|---|
+| No live `IdleManager` | `IdleManagerUnavailable` |
+| No live `GamePlayer.current` | `PlayerUnavailable` |
+| No live `TravelManager` | `TravelManagerUnavailable` |
+| `waypoints` unreadable | `WaypointsUnavailable` |
+| `waypoints.Count != 0` | `RouteStillHasWaypoints` |
+| `TravelActive()` true (incl. `usingJumpgate`) | `TravelStillActive` |
+| otherwise | `WriteTimer` |
+
+These are two cheap current reads, not a second opinion on whether a route
+completed: the API fact plus `ArrivalSnapReducer` still decide *that*. The guard
+only re-confirms the world has not moved on before the write lands, and anything
+unreadable fails closed.
+
+`ArrivalSnapApplyGuardTests` covers every branch; `TravelArrivalObserverTests`
+drives the reentrancy case end-to-end (a subscriber registered ahead of Echo
+starts a new route from inside the same dispatch, the reducer still approves the
+genuine fact, the guard refuses the write, and the modelled next idle tick makes
+no decision) with a control that writes and decides when nothing intervenes; and
+`PluginAssemblyShapeTests.ApplyArrivalSnapCallsThePureGuardWithTheLiveNativeReads`
+pins in the shipped IL that production really calls the tested guard with
+`GamePlayer.waypoints` and `TravelManager.TravelActive()`. The host model of the
+idle cycle is a model, not native coverage: protected in-game qualification must
+include an actual reentrant route supersession.
+
+Both managers are read through `Singleton<T>.Current`, a pure read of the
+already-registered singleton; `Instance` would run `FindAnyObjectByType` and
+write the shared static cache, which an observer has no business doing. A missing
+or destroyed manager (Unity fake-null included) simply leaves the vanilla cycle
+running.
 
 ## What never snaps
 

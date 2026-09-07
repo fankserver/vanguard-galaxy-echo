@@ -53,18 +53,30 @@ public sealed class PluginAssemblyShapeTests
     }
 
     /// <summary>True when resolving this reference would need the API assembly:
-    /// Cecil records an external type's home assembly as its scope.</summary>
-    private static bool FromApi(TypeReference? type)
+    /// Cecil records an external type's home assembly as its scope. The walk
+    /// follows every construction that can hide a token behind another type:
+    /// generic arguments, array/byref/pointer element types, and declaring
+    /// types of nested references.</summary>
+    internal static bool FromApi(TypeReference? type)
     {
-        if (type == null) return false;
-        if (type.GetElementType().Scope?.Name == ApiAssembly) return true;
-        return type is GenericInstanceType generic && generic.GenericArguments.Any(FromApi);
+        if (type == null || type is GenericParameter) return false;
+        if (type.Scope?.Name == ApiAssembly) return true;
+        if (type is GenericInstanceType generic && generic.GenericArguments.Any(FromApi)) return true;
+        if (type is TypeSpecification specification && FromApi(specification.ElementType)) return true;
+        return type.DeclaringType != null && FromApi(type.DeclaringType);
     }
 
-    /// <summary>Every API type name a member's signature, fields or IL operands
-    /// would make Mono resolve.</summary>
-    private static IEnumerable<string> ApiReferences(TypeDefinition type)
+    /// <summary>Every API type name a type's inheritance, members or IL operands
+    /// would make Mono resolve. Base types and interfaces matter because they are
+    /// loaded with the type itself, before any method body runs; generic method
+    /// type arguments matter because they live on the call site, not on the
+    /// callee's signature.</summary>
+    internal static IEnumerable<string> ApiReferences(TypeDefinition type)
     {
+        if (FromApi(type.BaseType)) yield return type.FullName + " : base " + type.BaseType.FullName;
+        foreach (var implemented in type.Interfaces)
+            if (FromApi(implemented.InterfaceType)) yield return type.FullName + " : implements " + implemented.InterfaceType.FullName;
+
         foreach (var field in type.Fields)
             if (FromApi(field.FieldType)) yield return type.FullName + "." + field.Name + " : " + field.FieldType.FullName;
 
@@ -91,6 +103,8 @@ public sealed class PluginAssemblyShapeTests
                 yield return method.DeclaringType;
                 yield return method.ReturnType;
                 foreach (var parameter in method.Parameters) yield return parameter.ParameterType;
+                if (method is GenericInstanceMethod instantiated)
+                    foreach (var argument in instantiated.GenericArguments) yield return argument;
                 break;
             case FieldReference field:
                 yield return field.DeclaringType;
@@ -142,6 +156,54 @@ public sealed class PluginAssemblyShapeTests
         Assert.True(method.NoInlining, name + " must be NoInlining.");
         Assert.False(FromApi(method.ReturnType));
         Assert.All(method.Parameters, parameter => Assert.False(FromApi(parameter.ParameterType)));
+    }
+
+    /// <summary>The pure write-time guard is only worth testing if production
+    /// actually consults it, and it is only correct if production hands it the
+    /// real native reads. This pins the whole chain in the shipped IL: the
+    /// guard call, both native conditions, and the pure singleton reads.</summary>
+    [Fact]
+    public void ApplyArrivalSnapCallsThePureGuardWithTheLiveNativeReads()
+    {
+        using var module = Read();
+        var apply = AllTypes(module).Single(type => type.FullName == "VGEcho.Patches.AutopilotTimingPatches")
+            .Methods.Single(method => method.Name == "ApplyArrivalSnap");
+
+        var calls = apply.Body.Instructions.Select(instruction => instruction.Operand as MethodReference)
+            .Where(reference => reference != null).Select(reference => reference!).ToArray();
+        var fields = apply.Body.Instructions.Select(instruction => instruction.Operand as FieldReference)
+            .Where(reference => reference != null).Select(reference => reference!).ToArray();
+
+        Assert.Contains(calls, reference => reference.Name == "Evaluate"
+            && reference.DeclaringType.FullName == "VGEcho.Travel.ArrivalSnapApplyGuard");
+        Assert.Contains(calls, reference => reference.Name == "TravelActive"
+            && reference.DeclaringType.FullName == "Behaviour.Managers.TravelManager");
+        Assert.Contains(fields, reference => reference.Name == "waypoints"
+            && reference.DeclaringType.FullName == "Source.Player.GamePlayer");
+        Assert.Contains(fields, reference => reference.Name == "current"
+            && reference.DeclaringType.FullName == "Source.Player.GamePlayer");
+
+        // Both managers are read through the pure Current accessor; Instance
+        // would run FindAnyObjectByType and seed the shared singleton cache.
+        Assert.Contains(calls, reference => reference.Name == "get_Current");
+        Assert.DoesNotContain(calls, reference => reference.Name == "get_Instance");
+    }
+
+    /// <summary>A missing optional dependency is the documented degraded state,
+    /// so the plugin must route it through the level chooser and be able to log
+    /// at either level.</summary>
+    [Fact]
+    public void TheBindingReportRoutesItsLevelThroughTheSharedChooser()
+    {
+        using var module = Read();
+        var bind = AllTypes(module).Single(type => type.FullName == "VGEcho.Plugin")
+            .Methods.Single(method => method.Name == "BindArrivalSnap");
+        var calls = bind.Body.Instructions.Select(instruction => (instruction.Operand as MethodReference)?.Name)
+            .Where(name => name != null).ToArray();
+
+        Assert.Contains("LevelFor", calls);
+        Assert.Contains("LogInfo", calls);
+        Assert.Contains("LogWarning", calls);
     }
 
     [Fact]

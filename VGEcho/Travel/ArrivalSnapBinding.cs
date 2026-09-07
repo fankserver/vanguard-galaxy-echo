@@ -24,6 +24,16 @@ internal enum ArrivalSnapAdmission
     CapabilityUnavailable,
 }
 
+/// <summary>How loudly a refused binding should be reported.</summary>
+internal enum ArrivalSnapLogLevel
+{
+    /// <summary>An expected, designed degraded state — nothing is wrong.</summary>
+    Info,
+
+    /// <summary>The API is installed but could not be used as intended.</summary>
+    Warning,
+}
+
 /// <summary>Pure admission rules for the VGModAPI travel soft-dependency.
 /// Deliberately free of API, BepInEx and Unity types so the version window and
 /// the capability/service requirements are unit-testable on a bare host.</summary>
@@ -72,6 +82,12 @@ internal static class ArrivalSnapBinding
     private const string Consequence =
         " Autopilot arrival-snap is disabled; ETA-sync and every other VGEcho feature are unaffected, " +
         "and no direct TravelManager hook is installed as a fallback.";
+
+    /// <summary>A missing optional dependency is the documented degraded state,
+    /// not a problem to warn about; every other refusal means the API IS
+    /// installed but could not be used as intended, which is worth a warning.</summary>
+    internal static ArrivalSnapLogLevel LevelFor(ArrivalSnapAdmission admission) =>
+        admission == ArrivalSnapAdmission.ApiAbsent ? ArrivalSnapLogLevel.Info : ArrivalSnapLogLevel.Warning;
 
     /// <summary>Operator-facing explanation for a refused binding.</summary>
     internal static string Explain(ArrivalSnapAdmission admission) => admission switch

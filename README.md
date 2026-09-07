@@ -76,7 +76,7 @@ Disable any feature independently — no rebuild needed, just relaunch the game.
 - Confirm `TimingEnabled = true` and the individual feature toggle is `true` in `vgecho.cfg`.
 
 **Arrival-snap does nothing but the rest of VGEcho works**
-- That is the designed degraded state. VGEcho logs the exact reason at startup: VGModAPI not installed, its version outside `0.1.9`–`0.1.x`, no travel service (`[Travel] Enabled = false` in `vgmodapi.cfg`), or the API reporting its `native-travel` capability as unavailable.
+- That is the designed degraded state. VGEcho logs the exact reason at startup: VGModAPI not installed (logged at Info — an optional dependency being absent is not a problem), or, at Warning, its version outside `0.1.9`–`0.1.x`, no travel service (`[Travel] Enabled = false` in `vgmodapi.cfg`), or the API reporting its `native-travel` capability as unavailable.
 - There is deliberately no fallback: VGEcho will not hook `TravelManager` itself when the API is unavailable. See [docs/api-travel-arrival.md](docs/api-travel-arrival.md).
 
 **`TypeInitializationException` on load**
@@ -85,7 +85,7 @@ Disable any feature independently — no rebuild needed, just relaunch the game.
 ## Known limitations
 
 - **Game version drift** — VGEcho hooks private method names (`IdleManager.DropFoundItem`, `IdleManager.Update`, `IdleManager.IdleTravelToSpaceStation`, `TravelManager.TravelToNextWaypoint` for the opt-in auto-refine), a private field literal (`IdleManager.idleTravelTarget`), compiler-generated backing-field literals (`<updateTimer>k__BackingField`, `<updateTimerBase>k__BackingField`), an IL-level method reference to `Inventory.Remove(InventoryItemType, int)`, and the autopilot tree name `"PromptEngineering"` for mastery lookups. A patch that renames any of these breaks the corresponding feature at load time (the stack-deposit transpiler self-disables with a console warning if the callsite count changes; mastery lookups fall through to "level 0" if the tree name changes, leaving stack-deposit gated as if mastery were never earned). File an issue with the BepInEx console output and wait for a new VGEcho build.
-- **Arrival-snap depends on VGModAPI's travel observation** — it owns no game hook of its own, so it inherits that API's coverage and its runtime-qualification status. VGModAPI's native travel group is still marked experimental.
+- **Arrival-snap depends on VGModAPI's travel observation** — it owns no game hook of its own, so it inherits that API's coverage and its runtime-qualification status. VGModAPI's native travel group is still marked experimental. The timer write does re-read the game's own waypoint list and `TravelActive()` first, so another API subscriber starting a new route in the same dispatch cannot make the autopilot decide mid-route.
 - **Booster cadence stays vanilla** — stack-deposit reduces drain to one tick per item *type*, but each tick still waits the vanilla `400/cargoCapacity` seconds between item types. That's intentional: ship-progression (cargo capacity) and the Prompt Engineering skill tree are vanilla's progression hooks for autopilot speed, and bypassing them was the predecessor `FastDeposit` / `FastFetch` features' main flaw — they're now removed.
 
 ## Building from source
@@ -114,7 +114,7 @@ make deploy GAME_DIR="/mnt/d/SteamLibrary/steamapps/common/Vanguard Galaxy"
 
 ## Releasing (for maintainers)
 
-Creating a GitHub Release auto-builds and uploads the zip via `.github/workflows/release.yml`. Every push and PR additionally runs `.github/workflows/checks.yml` (build + tests, Debug and Release). Both workflows check out the public [VGModAPI](https://github.com/fankserver/vanguard-galaxy-api) repo at a pinned commit and build `VGModAPI.Abstractions` themselves, because that reference is compile-only and not committed here.
+Creating a GitHub Release auto-builds and uploads the zip via `.github/workflows/release.yml`. Every push and PR additionally runs `.github/workflows/checks.yml` (build + tests, Debug and Release). Both workflows check out the public [VGModAPI](https://github.com/fankserver/vanguard-galaxy-api) repo at a pinned commit and build `VGModAPI.Abstractions` themselves, because that reference is compile-only and not committed here. That build runs from inside the API checkout so its `global.json` applies, which is why the workflows install SDK `10.0.111` exactly alongside `8.0.x`.
 
 CI compiles `VGEcho.dll` against **publicized stubs** committed at `VGEcho/lib/`:
 

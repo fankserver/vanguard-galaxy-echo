@@ -137,6 +137,77 @@ public sealed class TravelArrivalObserverTests
         Assert.Contains(harness.Traces, trace => trace.Contains(nameof(ArrivalSnapDecision.DuplicateRouteCompletion)));
     }
 
+    /// <summary>The reentrancy hazard the write-time guard exists for. The hub
+    /// dispatches subscribers synchronously in subscription order, so an earlier
+    /// subscriber can start a new route from inside the very callback chain that
+    /// is delivering the completion. The reducer still legitimately approves the
+    /// fact — it WAS a genuine owned completion — but the write-time guard sees
+    /// the refilled waypoint list and refuses, so the modelled next idle tick
+    /// makes no decision mid-route.</summary>
+    [Fact]
+    public void ASubscriberAheadOfEchoThatStartsANewRouteStopsTheWriteAndTheNextIdleTick()
+    {
+        var harness = new Harness();
+        var native = new SimulatedNativeTravel();
+        harness.Events.Subscribe("ahead-of-echo", transition =>
+        {
+            if (transition.Kind == TravelTransitionKind.RouteCompleted) native.StartNewRoute();
+        });
+        using var observer = harness.Build();
+        harness.OnSnap = native.ApplyArrivalSnap;
+
+        harness.Events.Emit(TravelFacts.Transition(Session, TravelTransitionKind.RouteCompleted, 1));
+
+        Assert.Equal(1, harness.Snaps);
+        Assert.Equal(ArrivalSnapApply.RouteStillHasWaypoints, native.LastDecision);
+        Assert.Equal(0, native.TimerWrites);
+        Assert.Equal(SimulatedNativeTravel.ActivityDelay, native.UpdateTimer);
+
+        native.IdleTick(0.02f);
+        Assert.Equal(0, native.FindActivityCalls);
+    }
+
+    /// <summary>Same hazard through the other native condition: the waypoint was
+    /// already consumed but a gate hop is engaged again, which only the full
+    /// <c>TravelActive()</c> reports.</summary>
+    [Fact]
+    public void ASubscriberAheadOfEchoThatEngagesAJumpGateStopsTheWriteAndTheNextIdleTick()
+    {
+        var harness = new Harness();
+        var native = new SimulatedNativeTravel();
+        harness.Events.Subscribe("ahead-of-echo", transition =>
+        {
+            if (transition.Kind == TravelTransitionKind.RouteCompleted) native.EngageJumpGate();
+        });
+        using var observer = harness.Build();
+        harness.OnSnap = native.ApplyArrivalSnap;
+
+        harness.Events.Emit(TravelFacts.Transition(Session, TravelTransitionKind.RouteCompleted, 1));
+
+        Assert.Equal(ArrivalSnapApply.TravelStillActive, native.LastDecision);
+        Assert.Equal(0, native.TimerWrites);
+        native.IdleTick(0.02f);
+        Assert.Equal(0, native.FindActivityCalls);
+    }
+
+    /// <summary>Control for both refusals above: with nothing ahead of Echo the
+    /// same fact does write, and the next tick decides.</summary>
+    [Fact]
+    public void WithNothingStartingANewRouteTheSameFactWritesAndTheNextIdleTickDecides()
+    {
+        var harness = new Harness();
+        var native = new SimulatedNativeTravel();
+        using var observer = harness.Build();
+        harness.OnSnap = native.ApplyArrivalSnap;
+
+        harness.Events.Emit(TravelFacts.Transition(Session, TravelTransitionKind.RouteCompleted, 1));
+
+        Assert.Equal(ArrivalSnapApply.WriteTimer, native.LastDecision);
+        Assert.Equal(1, native.TimerWrites);
+        native.IdleTick(0.02f);
+        Assert.Equal(1, native.FindActivityCalls);
+    }
+
     [Fact]
     public void AFactAttributedToAReplacedSessionIsRejected()
     {
