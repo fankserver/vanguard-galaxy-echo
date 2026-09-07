@@ -147,6 +147,42 @@ public sealed class ShapeScanRegressionTests
         Assert.Contains(findings, finding => finding.Contains("local"));
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void TheScanChecksCatchTypesWithoutFlaggingApiFreeHandlers(bool fromApi)
+    {
+        using var synthetic = new Synthetic();
+        var owner = synthetic.AddType("HandlesException");
+        var method = new MethodDefinition("Handle", MethodAttributes.Public | MethodAttributes.Static,
+            synthetic.Module.TypeSystem.Void);
+        owner.Methods.Add(method);
+        var il = method.Body.GetILProcessor();
+        var start = Instruction.Create(OpCodes.Nop);
+        var handlerStart = Instruction.Create(OpCodes.Pop);
+        var end = Instruction.Create(OpCodes.Ret);
+        il.Append(start);
+        il.Emit(OpCodes.Leave, end);
+        il.Append(handlerStart);
+        il.Emit(OpCodes.Leave, end);
+        il.Append(end);
+        method.Body.ExceptionHandlers.Add(new ExceptionHandler(ExceptionHandlerType.Catch)
+        {
+            TryStart = start,
+            TryEnd = handlerStart,
+            HandlerStart = handlerStart,
+            HandlerEnd = end,
+            CatchType = fromApi
+                ? new TypeReference("VGModAPI", "SomeException", synthetic.Module, synthetic.ApiType.Scope)
+                : synthetic.Module.ImportReference(typeof(Exception))
+        });
+
+        if (fromApi)
+            Assert.Contains(Scan(owner), finding => finding.Contains("catches VGModAPI.SomeException"));
+        else
+            Assert.Empty(Scan(owner));
+    }
+
     /// <summary>Control: a type touching none of it produces no findings, so the
     /// cases above are detections rather than a scan that always fires.</summary>
     [Fact]

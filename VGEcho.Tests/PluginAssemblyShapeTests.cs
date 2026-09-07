@@ -88,6 +88,8 @@ public sealed class PluginAssemblyShapeTests
             if (!method.HasBody) continue;
             foreach (var variable in method.Body.Variables)
                 if (FromApi(variable.VariableType)) yield return method.FullName + " local " + variable.VariableType.FullName;
+            foreach (var handler in method.Body.ExceptionHandlers)
+                if (FromApi(handler.CatchType)) yield return method.FullName + " catches " + handler.CatchType.FullName;
             foreach (var instruction in method.Body.Instructions)
                 foreach (var referenced in Operands(instruction))
                     if (FromApi(referenced)) yield return method.FullName + " -> " + referenced.FullName;
