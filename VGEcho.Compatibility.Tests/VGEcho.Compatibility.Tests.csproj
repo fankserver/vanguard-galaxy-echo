@@ -1,0 +1,38 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!-- net8.0 keeps the suite runnable on the 8.x SDK the release workflow
+         installs; the Makefile exports DOTNET_ROLL_FORWARD=LatestMajor so it
+         also runs on a host that only has a newer runtime. -->
+    <TargetFramework>net8.0</TargetFramework>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <RootNamespace>VGEcho.Compatibility.Tests</RootNamespace>
+    <RestoreAdditionalProjectSources>
+      https://api.nuget.org/v3/index.json;
+    </RestoreAdditionalProjectSources>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.*" />
+    <PackageReference Include="xunit" Version="2.*" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.*" />
+    <!-- Reads the built VGEcho.dll and the installed game assembly as METADATA
+         only. Nothing here loads or executes either one, so no Unity runtime,
+         no BepInEx and no game process is involved. -->
+    <PackageReference Include="Mono.Cecil" Version="0.11.*" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The native-Remove binding is LINKED, not project-referenced: referencing
+         VGEcho.csproj would drag in BepInEx, UnityEngine and the publicized game
+         stub, and this suite must stay runnable on a bare .NET host. The linked
+         file is deliberately free of Unity, BepInEx and Harmony types, so the
+         tests exercise the real production resolve/delegate code against a
+         synthetic inventory instead of a copy of it. -->
+    <Compile Include="..\VGEcho\Patches\NativeInventoryRemoveBinding.cs" Link="Production\NativeInventoryRemoveBinding.cs" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,81 @@
+name: Compatibility checks
+
+# Asset-free build + game-compatibility regression suite. Compiles VGEcho.dll
+# against the publicized stubs committed at VGEcho/lib/ and runs
+# VGEcho.Compatibility.Tests: the linked native-Remove binding helper against
+# synthetic inventories, plus Cecil metadata/IL checks over the freshly built
+# DLL. Nothing here loads Unity, BepInEx or the game.
+#
+# Since 0.7.0 the plugin also needs VGModAPI's compile-only contract, so this
+# workflow provisions it exactly the way checks.yml and release.yml do.
+#
+# The checks that read the ORIGINAL installed Assembly-CSharp.dll are tagged
+# Category=InstalledGame and stay local — `make compat-check-bindings`.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: compat-checks-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  compat:
+    name: Compatibility (${{ matrix.configuration }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        configuration: [Debug, Release]
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      # VGModAPI's consumer contract is compile-only and is never committed
+      # here, so CI builds it from the public API repo at a pinned commit.
+      - name: Checkout VGModAPI contract source
+        uses: actions/checkout@v7
+        with:
+          repository: fankserver/vanguard-galaxy-api
+          ref: 497c624ded3fe638833e603746b665f4ce515ea3
+          path: .vgmodapi
+          persist-credentials: false
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v6
+        with:
+          # The API checkout pins SDK 10.0.111 with rollForward: latestPatch,
+          # which only accepts 10.0.1xx patches - a floating 10.0.x resolves to a
+          # different feature band and does NOT satisfy it. Install that exact
+          # version; 8.0.x is what VGEcho and its test suites use.
+          dotnet-version: |
+            8.0.x
+            10.0.111
+
+      # Built from INSIDE the checkout so its global.json is actually honoured;
+      # invoking it from the Echo root would silently bypass the pin.
+      - name: Build VGModAPI.Abstractions (no Unity or game assets)
+        working-directory: .vgmodapi
+        run: |
+          dotnet --version
+          dotnet build VGModAPI.Abstractions/VGModAPI.Abstractions.csproj -c Release --nologo
+
+      - name: Verify publicized references are committed
+        run: |
+          for stub in Assembly-CSharp.dll UnityEngine.UI.dll Unity.TextMeshPro.dll; do
+            test -s "VGEcho/lib/$stub" || { echo "::error::VGEcho/lib/$stub is missing or empty."; exit 1; }
+          done
+
+      - name: Build and run compatibility tests
+        run: |
+          make compat-test \
+            CONFIG=${{ matrix.configuration }} \
+            VGAPI_DLL=.vgmodapi/VGModAPI.Abstractions/bin/Release/netstandard2.1/VGModAPI.Abstractions.dll

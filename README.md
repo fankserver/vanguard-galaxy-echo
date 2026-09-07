@@ -12,6 +12,10 @@ A BepInEx plugin for [Vanguard Galaxy](https://store.steampowered.com/app/347180
 
 ETA-sync, Arrival-snap, and Stack-deposit don't change *what* ECHO decides — they fix UI lies, residual waits, and a per-tick architecture artifact respectively. The opt-in toggles change routing, station behavior, or ability casting; they default off so existing installs stay on vanilla decisions.
 
+## Compatibility
+
+Built and verified against **Vanguard Galaxy 0.8.2.3**. Game 0.8.2 reshaped `Inventory.Remove(InventoryItemType, int)` into `Inventory.Remove(InventoryItemType, int, bool skipFavourited = false)`; VGEcho 0.6.0 and earlier bound the old two-argument form, so on 0.8.2+ the stack-deposit patch threw at load and Harmony reported `Failed to patch ... IdleManager::DropFoundItem` in the BepInEx console. VGEcho 0.6.1 binds the current overload and forwards the native `skipFavourited` flag unchanged, leaving deposit tiers, destination caps and favourite-stack protection exactly as vanilla decides them; every later release carries that fix, 0.7.0 included. Upgrade if you are on 0.8.2 or newer.
+
 ## Install
 
 1. **Install BepInEx 5.x** — grab `BepInEx_win_x64_5.4.x.zip` from the [BepInEx releases](https://github.com/BepInEx/BepInEx/releases) and unzip it into your Vanguard Galaxy install folder (next to `VanguardGalaxy.exe`).
@@ -84,7 +88,7 @@ Disable any feature independently — no rebuild needed, just relaunch the game.
 
 ## Known limitations
 
-- **Game version drift** — VGEcho hooks private method names (`IdleManager.DropFoundItem`, `IdleManager.Update`, `IdleManager.IdleTravelToSpaceStation`, `TravelManager.TravelToNextWaypoint` for the opt-in auto-refine), a private field literal (`IdleManager.idleTravelTarget`), compiler-generated backing-field literals (`<updateTimer>k__BackingField`, `<updateTimerBase>k__BackingField`), an IL-level method reference to `Inventory.Remove(InventoryItemType, int)`, and the autopilot tree name `"PromptEngineering"` for mastery lookups. A patch that renames any of these breaks the corresponding feature at load time (the stack-deposit transpiler self-disables with a console warning if the callsite count changes; mastery lookups fall through to "level 0" if the tree name changes, leaving stack-deposit gated as if mastery were never earned). File an issue with the BepInEx console output and wait for a new VGEcho build.
+- **Game version drift** — VGEcho hooks private method names (`IdleManager.DropFoundItem`, `IdleManager.Update`, `IdleManager.IdleTravelToSpaceStation`, `TravelManager.TravelToNextWaypoint` for the opt-in auto-refine), a private field literal (`IdleManager.idleTravelTarget`), compiler-generated backing-field literals (`<updateTimer>k__BackingField`, `<updateTimerBase>k__BackingField`), a reflectively resolved method reference to `Inventory.Remove(InventoryItemType, int, bool)`, and the autopilot tree name `"PromptEngineering"` for mastery lookups. A patch that renames any of these breaks the corresponding feature at load time (the stack-deposit transpiler self-disables with a console warning if the callsite count changes; mastery lookups fall through to "level 0" if the tree name changes, leaving stack-deposit gated as if mastery were never earned). File an issue with the BepInEx console output and wait for a new VGEcho build.
 - **Arrival-snap depends on VGModAPI's travel observation** — it owns no game hook of its own, so it inherits that API's coverage and its runtime-qualification status. VGModAPI's native travel group is still marked experimental. The timer write does re-read the game's own waypoint list and `TravelActive()` first, so another API subscriber starting a new route in the same dispatch cannot make the autopilot decide mid-route.
 - **Booster cadence stays vanilla** — stack-deposit reduces drain to one tick per item *type*, but each tick still waits the vanilla `400/cargoCapacity` seconds between item types. That's intentional: ship-progression (cargo capacity) and the Prompt Engineering skill tree are vanilla's progression hooks for autopilot speed, and bypassing them was the predecessor `FastDeposit` / `FastFetch` features' main flaw — they're now removed.
 
@@ -103,18 +107,22 @@ Build that first (`make build CONFIGURATION=Release` inside the API checkout), o
 ```bash
 make build
 make build VGAPI_DLL=/path/to/VGModAPI.Abstractions.dll
-make test                 # asset-free: pure decisions + Cecil metadata over the built DLL
-make check-bindings       # game-compat metadata checks; needs the local install
+make test                   # asset-free: pure decisions + Cecil metadata over the built DLL
+make check-bindings         # travel/timing metadata checks; needs the local install
+make compat-test            # game-compatibility regression suite (no game install needed)
+make compat-check-bindings  # same suite's Category=InstalledGame checks, against your local install
 make deploy
 # or with a custom install:
 make deploy GAME_DIR="/mnt/d/SteamLibrary/steamapps/common/Vanguard Galaxy"
 ```
 
-`build` symlinks the game's `Assembly-CSharp.dll` and the API contract into `VGEcho/lib/` for compile-time references; `deploy` copies `VGEcho.dll` into `<game>/BepInEx/plugins/`.
+`build` symlinks the game's `Assembly-CSharp.dll` and the API contract into `VGEcho/lib/` for compile-time references; `deploy` copies `VGEcho.dll` into `<game>/BepInEx/plugins/`. Every `test` target fails when its `--filter` matches nothing, so a renamed category can't pass as a green run.
+
+`make compat-test` is what CI runs (`.github/workflows/compat-checks.yml`). It exercises the native-`Remove` binding helper against synthetic inventories and reads the freshly built `VGEcho.dll` with Mono.Cecil to assert the plugin carries no reference to the removed two-argument overload and forwards `skipFavourited` on every deposit branch. `make compat-check-bindings` additionally reads your installed `Assembly-CSharp.dll` as metadata (never loaded, never executed, never copied) to confirm the live `DropFoundItem` still has exactly one `Inventory.Remove` callsite with the signature the transpiler binds.
 
 ## Releasing (for maintainers)
 
-Creating a GitHub Release auto-builds and uploads the zip via `.github/workflows/release.yml`. Every push and PR additionally runs `.github/workflows/checks.yml` (build + tests, Debug and Release). Both workflows check out the public [VGModAPI](https://github.com/fankserver/vanguard-galaxy-api) repo at a pinned commit and build `VGModAPI.Abstractions` themselves, because that reference is compile-only and not committed here. That build runs from inside the API checkout so its `global.json` applies, which is why the workflows install SDK `10.0.111` exactly alongside `8.0.x`.
+Creating a GitHub Release auto-builds and uploads the zip via `.github/workflows/release.yml`. Every push and PR additionally runs `.github/workflows/checks.yml` (build + travel/timing tests) and `.github/workflows/compat-checks.yml` (build + game-compatibility tests), both Debug and Release. All three workflows check out the public [VGModAPI](https://github.com/fankserver/vanguard-galaxy-api) repo at a pinned commit and build `VGModAPI.Abstractions` themselves, because that reference is compile-only and not committed here — since 0.7.0 the plugin does not compile without it. That build runs from inside the API checkout so its `global.json` applies, which is why the workflows install SDK `10.0.111` exactly alongside `8.0.x`.
 
 CI compiles `VGEcho.dll` against **publicized stubs** committed at `VGEcho/lib/`:
 
