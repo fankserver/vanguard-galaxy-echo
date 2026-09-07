@@ -37,7 +37,7 @@ public enum StackDepositMode
 /// a 200-unit hold takes ~6.6 minutes to drain regardless of cargo diversity.
 ///
 /// We transpile the deposit-amount argument of the single
-/// <c>cargo.Remove(InventoryItemType, int)</c> call inside <c>DropFoundItem</c>
+/// <c>cargo.Remove(InventoryItemType, int, bool)</c> call inside <c>DropFoundItem</c>
 /// so each tick moves more of the selected non-ammo / non-currency item type
 /// at once. How much depends on <see cref="StackDepositMode"/> and the player's
 /// autopilot mastery level — vanilla's autopilot tree already accumulates
@@ -76,12 +76,24 @@ public enum StackDepositMode
 internal static class AutopilotStackPatches
 {
     // Resolved once at type init so we can fail loudly at startup rather than
-    // silently no-op the transpiler if the (InventoryItemType, int) overload
-    // ever gets renamed or removed.
+    // silently no-op the transpiler if the removal overload ever gets renamed
+    // or reshaped. Game 0.8.2.3 declares
+    // Remove(InventoryItemType, int, bool skipFavourited = false); DropFoundItem
+    // omits the optional argument, so the compiled callsite still pushes the
+    // default `false` and the transpiler has to match the three-argument form.
     private static readonly MethodInfo InventoryRemoveByType =
-        AccessTools.Method(typeof(Inventory), nameof(Inventory.Remove), new[] { typeof(InventoryItemType), typeof(int) })
-        ?? throw new InvalidOperationException(
-            "[autopilot-stack] Inventory.Remove(InventoryItemType, int) not found — game version mismatch?");
+        NativeInventoryRemoveBinding.ResolveRemove(typeof(Inventory), typeof(InventoryItemType));
+
+    // Cached open-instance delegate over the same MethodInfo. The committed
+    // publicized stub still declares the old two-argument Remove, so calling it
+    // directly from here would emit a member reference the live game no longer
+    // has (MissingMethodException on every deposit). Every removal below —
+    // vanilla-passthrough branches included — goes through this delegate and
+    // forwards the native skipFavourited flag unchanged.
+    // The item parameter is nullable because one branch deliberately hands a
+    // null item straight to vanilla rather than deciding what null should mean.
+    private static readonly Func<Inventory, InventoryItemType?, int, bool, int> NativeRemove =
+        NativeInventoryRemoveBinding.CreateOpenRemoveDelegate<Inventory, InventoryItemType?>(InventoryRemoveByType);
 
     private static readonly MethodInfo StackAwareRemoveImpl =
         AccessTools.Method(typeof(AutopilotStackPatches), nameof(StackAwareRemove))
@@ -224,22 +236,26 @@ internal static class AutopilotStackPatches
     }
 
     /// <summary>
-    /// Drop-in replacement for the <c>cargo.Remove(item, vanillaAmount)</c> call
-    /// inside <c>IdleManager.DropFoundItem</c>. Same signature as
-    /// <see cref="Inventory.Remove(InventoryItemType, int)"/> at the IL level
-    /// (consumes [cargo, item, amount], returns int actually removed) so the
-    /// transpiler can swap a single instruction.
+    /// Drop-in replacement for the <c>cargo.Remove(item, vanillaAmount, false)</c>
+    /// call inside <c>IdleManager.DropFoundItem</c>. Consumes the same operands
+    /// the native callsite already pushes ([cargo, item, amount, skipFavourited])
+    /// and returns the same type (int actually removed), so the transpiler can
+    /// swap a single instruction without touching the stack shape.
+    ///
+    /// <paramref name="skipFavourited"/> is the native flag read straight off the
+    /// stack; it is forwarded unchanged to the real <c>Remove</c> on every branch
+    /// so favourite-stack protection keeps behaving exactly as vanilla decided.
     ///
     /// For ammo and currency, defers to vanilla — those categories have
     /// intentional per-cycle batch sizes (20/mag-size, 20). For everything
     /// else, deposit the tier-driven amount capped by destination free space.
     /// </summary>
-    internal static int StackAwareRemove(Inventory cargo, InventoryItemType item, int vanillaAmount)
+    internal static int StackAwareRemove(Inventory cargo, InventoryItemType item, int vanillaAmount, bool skipFavourited)
     {
         var mode = Plugin.Instance.CfgAutopilotStackDepositMode.Value;
         if (mode == StackDepositMode.Off)
         {
-            return cargo.Remove(item, vanillaAmount);
+            return NativeRemove(cargo, item, vanillaAmount, skipFavourited);
         }
 
         // Only act on the autopilot path. DropFoundItem runs inside the
@@ -249,12 +265,12 @@ internal static class AutopilotStackPatches
         var player = GamePlayer.current;
         if (player == null || !player.autoPlay)
         {
-            return cargo.Remove(item, vanillaAmount);
+            return NativeRemove(cargo, item, vanillaAmount, skipFavourited);
         }
 
         if (item == null)
         {
-            return cargo.Remove(item, vanillaAmount);
+            return NativeRemove(cargo, item, vanillaAmount, skipFavourited);
         }
 
         // Preserve vanilla cadence for ammo and currency. Their explicit
@@ -264,7 +280,7 @@ internal static class AutopilotStackPatches
         // assumptions baked into FindActivityForEquipment / GetAmmoTypesRequired.
         if (item.itemCategory == ItemCategory.Ammo || item.itemCategory == ItemCategory.Currency)
         {
-            return cargo.Remove(item, vanillaAmount);
+            return NativeRemove(cargo, item, vanillaAmount, skipFavourited);
         }
 
         int stackCount = cargo.GetCount(item);
@@ -273,7 +289,7 @@ internal static class AutopilotStackPatches
 
         if (tickAmount <= vanillaAmount)
         {
-            return cargo.Remove(item, vanillaAmount);
+            return NativeRemove(cargo, item, vanillaAmount, skipFavourited);
         }
 
         // Determine destination the same way vanilla's FindActivity does. We
@@ -293,12 +309,12 @@ internal static class AutopilotStackPatches
         }
         else
         {
-            return cargo.Remove(item, vanillaAmount);
+            return NativeRemove(cargo, item, vanillaAmount, skipFavourited);
         }
 
         if (dest == null)
         {
-            return cargo.Remove(item, vanillaAmount);
+            return NativeRemove(cargo, item, vanillaAmount, skipFavourited);
         }
 
         // Cap by free m³ in the destination. item.m3 is per-unit volume;
@@ -321,18 +337,18 @@ internal static class AutopilotStackPatches
             $"[autopilot-stack] depositing {amount}× {item.displayName} " +
             $"(stack={stackCount}, m3-cap={safeByM3}, mastery={masteryLevel}, mode={mode})");
 
-        return cargo.Remove(item, amount);
+        return NativeRemove(cargo, item, amount, skipFavourited);
     }
 
     /// <summary>
-    /// Replaces the single <c>callvirt Inventory.Remove(InventoryItemType, int)</c>
+    /// Replaces the single <c>callvirt Inventory.Remove(InventoryItemType, int, bool)</c>
     /// inside <c>IdleManager.DropFoundItem</c> with a call to
-    /// <see cref="StackAwareRemove"/>. The helper takes the same three operands
-    /// from the stack ([cargo, item, amount]) and returns the same type (int),
-    /// so it's a one-instruction swap with no stack juggling.
+    /// <see cref="StackAwareRemove"/>. The helper takes the same four operands
+    /// from the stack ([cargo, item, amount, skipFavourited]) and returns the
+    /// same type (int), so it's a one-instruction swap with no stack juggling.
     ///
     /// We expect exactly one match. If a future game patch adds another
-    /// <c>cargo.Remove(InventoryItemType, int)</c> callsite into DropFoundItem,
+    /// <c>cargo.Remove(InventoryItemType, int, bool)</c> callsite into DropFoundItem,
     /// we log a warning and skip rather than blindly rewriting both — the user
     /// can disable <c>StackDeposit</c> in config until the mod is updated.
     /// </summary>
@@ -359,7 +375,7 @@ internal static class AutopilotStackPatches
         if (matches == 0)
         {
             Plugin.Log.LogWarning(
-                "[autopilot-stack] DropFoundItem transpiler: no cargo.Remove(InventoryItemType, int) " +
+                "[autopilot-stack] DropFoundItem transpiler: no cargo.Remove(InventoryItemType, int, bool) " +
                 "callsite found — stack-deposit will be inactive. Game version may have changed.");
             return list;
         }

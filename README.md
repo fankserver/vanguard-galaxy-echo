@@ -12,6 +12,10 @@ A BepInEx plugin for [Vanguard Galaxy](https://store.steampowered.com/app/347180
 
 ETA-sync, Arrival-snap, and Stack-deposit don't change *what* ECHO decides — they fix UI lies, residual waits, and a per-tick architecture artifact respectively. The opt-in toggles change routing, station behavior, or ability casting; they default off so existing installs stay on vanilla decisions.
 
+## Compatibility
+
+Built and verified against **Vanguard Galaxy 0.8.2.3**. Game 0.8.2 reshaped `Inventory.Remove(InventoryItemType, int)` into `Inventory.Remove(InventoryItemType, int, bool skipFavourited = false)`; VGEcho 0.6.0 and earlier bound the old two-argument form, so on 0.8.2+ the stack-deposit patch threw at load and Harmony reported `Failed to patch ... IdleManager::DropFoundItem` in the BepInEx console. VGEcho 0.6.1 binds the current overload and forwards the native `skipFavourited` flag unchanged, leaving deposit tiers, destination caps and favourite-stack protection exactly as vanilla decides them. Upgrade if you are on 0.8.2 or newer.
+
 ## Install
 
 1. **Install BepInEx 5.x** — grab `BepInEx_win_x64_5.4.x.zip` from the [BepInEx releases](https://github.com/BepInEx/BepInEx/releases) and unzip it into your Vanguard Galaxy install folder (next to `VanguardGalaxy.exe`).
@@ -80,7 +84,7 @@ Disable any feature independently — no rebuild needed, just relaunch the game.
 
 ## Known limitations
 
-- **Game version drift** — VGEcho hooks private method names (`IdleManager.DropFoundItem`, `IdleManager.Update`, `IdleManager.IdleTravelToSpaceStation`, `TravelManager.TravelToNextWaypoint`), a private field literal (`IdleManager.idleTravelTarget`), compiler-generated backing-field literals (`<updateTimer>k__BackingField`, `<updateTimerBase>k__BackingField`), an IL-level method reference to `Inventory.Remove(InventoryItemType, int)`, and the autopilot tree name `"PromptEngineering"` for mastery lookups. A patch that renames any of these breaks the corresponding feature at load time (the stack-deposit transpiler self-disables with a console warning if the callsite count changes; mastery lookups fall through to "level 0" if the tree name changes, leaving stack-deposit gated as if mastery were never earned). File an issue with the BepInEx console output and wait for a new VGEcho build.
+- **Game version drift** — VGEcho hooks private method names (`IdleManager.DropFoundItem`, `IdleManager.Update`, `IdleManager.IdleTravelToSpaceStation`, `TravelManager.TravelToNextWaypoint`), a private field literal (`IdleManager.idleTravelTarget`), compiler-generated backing-field literals (`<updateTimer>k__BackingField`, `<updateTimerBase>k__BackingField`), an IL-level method reference to `Inventory.Remove(InventoryItemType, int, bool)`, and the autopilot tree name `"PromptEngineering"` for mastery lookups. A patch that renames any of these breaks the corresponding feature at load time (the stack-deposit transpiler self-disables with a console warning if the callsite count changes; mastery lookups fall through to "level 0" if the tree name changes, leaving stack-deposit gated as if mastery were never earned). File an issue with the BepInEx console output and wait for a new VGEcho build.
 - **Booster cadence stays vanilla** — stack-deposit reduces drain to one tick per item *type*, but each tick still waits the vanilla `400/cargoCapacity` seconds between item types. That's intentional: ship-progression (cargo capacity) and the Prompt Engineering skill tree are vanilla's progression hooks for autopilot speed, and bypassing them was the predecessor `FastDeposit` / `FastFetch` features' main flaw — they're now removed.
 
 ## Building from source
@@ -94,6 +98,13 @@ make deploy GAME_DIR="/mnt/d/SteamLibrary/steamapps/common/Vanguard Galaxy"
 ```
 
 This symlinks the game's `Assembly-CSharp.dll` into `VGEcho/lib/` for compile-time references, builds the plugin, and copies the DLL into `<game>/BepInEx/plugins/`.
+
+```bash
+make compat-test            # build + game-compatibility regression suite (no game install needed)
+make compat-check-bindings  # same suite's Category=InstalledGame checks, against your local install
+```
+
+`make compat-test` is what CI runs (`.github/workflows/compat-checks.yml`). It exercises the native-`Remove` binding helper against synthetic inventories and reads the freshly built `VGEcho.dll` with Mono.Cecil to assert the plugin carries no reference to the removed two-argument overload and forwards `skipFavourited` on every deposit branch. `make compat-check-bindings` additionally reads your installed `Assembly-CSharp.dll` as metadata (never loaded, never executed, never copied) to confirm the live `DropFoundItem` still has exactly one `Inventory.Remove` callsite with the signature the transpiler binds.
 
 ## Releasing (for maintainers)
 
