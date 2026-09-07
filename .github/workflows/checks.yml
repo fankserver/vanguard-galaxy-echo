@@ -1,0 +1,72 @@
+name: Checks
+
+# Asset-free build + test. Compiles VGEcho.dll against the publicized stubs
+# committed at VGEcho/lib/ and runs the arrival-snap suite: pure reducer and
+# binding decisions plus Cecil metadata checks over the freshly built DLL.
+#
+# The installed-game compatibility checks (Category=InstalledGame) need the
+# original Assembly-CSharp.dll and stay local — `make check-bindings`.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: checks-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    name: Build and test (${{ matrix.configuration }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        configuration: [Debug, Release]
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      # VGModAPI's consumer contract is compile-only and is never committed
+      # here, so CI builds it from the public API repo at a pinned commit.
+      - name: Checkout VGModAPI contract source
+        uses: actions/checkout@v7
+        with:
+          repository: fankserver/vanguard-galaxy-api
+          ref: 497c624ded3fe638833e603746b665f4ce515ea3
+          path: .vgmodapi
+          persist-credentials: false
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v6
+        with:
+          # 10.0.x satisfies the API checkout's global.json (10.0.111,
+          # rollForward latestPatch); 8.0.x is what VGEcho.Tests targets.
+          dotnet-version: |
+            8.0.x
+            10.0.x
+
+      - name: Build VGModAPI.Abstractions (no Unity or game assets)
+        run: dotnet build .vgmodapi/VGModAPI.Abstractions/VGModAPI.Abstractions.csproj -c Release --nologo
+
+      - name: Verify publicized references are committed
+        run: |
+          for stub in Assembly-CSharp.dll UnityEngine.UI.dll Unity.TextMeshPro.dll; do
+            test -s "VGEcho/lib/$stub" || { echo "::error::VGEcho/lib/$stub is missing or empty."; exit 1; }
+          done
+
+      # Also asserts, through PluginAssemblyShapeTests, that the built DLL keeps
+      # every VGModAPI token off the always-JIT plugin members and ships no copy
+      # of the API assembly.
+      - name: Build and test
+        run: |
+          make test \
+            CONFIG=${{ matrix.configuration }} \
+            VGAPI_DLL=.vgmodapi/VGModAPI.Abstractions/bin/Release/netstandard2.1/VGModAPI.Abstractions.dll

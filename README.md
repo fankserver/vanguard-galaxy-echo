@@ -3,7 +3,7 @@
 A BepInEx plugin for [Vanguard Galaxy](https://store.steampowered.com/app/3471800/) that enhances ECHO — the in-game autopilot AI. Surgical changes to where vanilla's per-tick autopilot loop creates avoidable friction, without bulldozing the Prompt Engineering skill tree's intentional cadence costs.
 
 - **ETA-sync** — while the ship is warping, the Autopilot side-tab's green progress circle tracks live distance-based travel progress instead of the vanilla 12 s loop. Completes exactly on drop-out.
-- **Arrival-snap** — on reaching the final waypoint, the next autonomous action fires on the following frame instead of after a 0–12 s residual wait.
+- **Arrival-snap** *(needs [VGModAPI](https://github.com/fankserver/vanguard-galaxy-api) 0.1.9+)* — on completing the final route, the next autonomous action fires on the following frame instead of after a 0–12 s residual wait. Driven by VGModAPI's verified `RouteCompleted` travel observation, not by a hook of our own. Without the API this one feature stays off and everything else works unchanged.
 - **Stack deposit** — each deposit cycle moves the full stack of an item type instead of one unit. Cycle cadence is unchanged (still `400/cargoCapacity` seconds, still gated by ship-progression and the Prompt Engineering skill tree), so a diverse 200-unit hold drains in *one tick per item type* instead of one per unit. Ammo and currency keep their vanilla per-cycle batches.
 - **Refinery routing** *(opt-in)* — when the autopilot would fly home with ore in cargo and home has no refinery, divert to the nearest friendly station with one. Saves the round-trip when mining far from base.
 - **Auto-refine on arrival** *(opt-in)* — when the autopilot docks at a station with a refinery, flip that refinery's Auto-Refine toggle on so pending ore refines passively while you're there.
@@ -41,7 +41,7 @@ BepInEx writes the config to `BepInEx/config/vgecho.cfg` on first launch. All to
 | ------------------ | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `TimingEnabled`    | `true`  | Master toggle for `EtaSync` and `ArrivalSnap`. When `false`, both are skipped and the vanilla 12 s cycle runs unchanged. Does not affect `StackDeposit`.                                      |
 | `EtaSync`          | `true`  | While warping, drive the cycle from distance-based travel progress. Fill circle completes exactly on drop-out.                                                                                |
-| `ArrivalSnap`      | `true`  | On final-waypoint arrival, zero the cycle so the next autonomous action fires immediately.                                                                                                    |
+| `ArrivalSnap`      | `true`  | On genuine final-route completion, zero the cycle so the next autonomous action fires immediately. Additionally requires VGModAPI 0.1.9–0.1.x with `[Travel] Enabled = true`; without it the toggle does nothing and no game hook is installed in its place. |
 | `StackDepositMode` | `Tiered`  | Controls how each autopilot deposit cycle moves cargo. `Off` = vanilla 1 unit/tick. `Tiered` = mastery-driven progression curve mirroring vanilla's `milestonesMastery` cadence (see table below). `Always` = full stack from level 0 (pure QoL override). Cycle cadence is unchanged in all modes. Independent of `TimingEnabled`. |
 
 `Tiered` progression table:
@@ -75,29 +75,48 @@ Disable any feature independently — no rebuild needed, just relaunch the game.
 - Autopilot has to be engaged (default hotkey `T`). Every patch is gated on `GamePlayer.current.autoPlay`; when autopilot is off, the vanilla cycle runs unchanged.
 - Confirm `TimingEnabled = true` and the individual feature toggle is `true` in `vgecho.cfg`.
 
+**Arrival-snap does nothing but the rest of VGEcho works**
+- That is the designed degraded state. VGEcho logs the exact reason at startup: VGModAPI not installed, its version outside `0.1.9`–`0.1.x`, no travel service (`[Travel] Enabled = false` in `vgmodapi.cfg`), or the API reporting its `native-travel` capability as unavailable.
+- There is deliberately no fallback: VGEcho will not hook `TravelManager` itself when the API is unavailable. See [docs/api-travel-arrival.md](docs/api-travel-arrival.md).
+
 **`TypeInitializationException` on load**
 - Likely a game update renamed an internal field or method that VGEcho hooks. See "Known limitations" below. A rebuild against the new game version is needed.
 
 ## Known limitations
 
-- **Game version drift** — VGEcho hooks private method names (`IdleManager.DropFoundItem`, `IdleManager.Update`, `IdleManager.IdleTravelToSpaceStation`, `TravelManager.TravelToNextWaypoint`), a private field literal (`IdleManager.idleTravelTarget`), compiler-generated backing-field literals (`<updateTimer>k__BackingField`, `<updateTimerBase>k__BackingField`), an IL-level method reference to `Inventory.Remove(InventoryItemType, int)`, and the autopilot tree name `"PromptEngineering"` for mastery lookups. A patch that renames any of these breaks the corresponding feature at load time (the stack-deposit transpiler self-disables with a console warning if the callsite count changes; mastery lookups fall through to "level 0" if the tree name changes, leaving stack-deposit gated as if mastery were never earned). File an issue with the BepInEx console output and wait for a new VGEcho build.
+- **Game version drift** — VGEcho hooks private method names (`IdleManager.DropFoundItem`, `IdleManager.Update`, `IdleManager.IdleTravelToSpaceStation`, `TravelManager.TravelToNextWaypoint` for the opt-in auto-refine), a private field literal (`IdleManager.idleTravelTarget`), compiler-generated backing-field literals (`<updateTimer>k__BackingField`, `<updateTimerBase>k__BackingField`), an IL-level method reference to `Inventory.Remove(InventoryItemType, int)`, and the autopilot tree name `"PromptEngineering"` for mastery lookups. A patch that renames any of these breaks the corresponding feature at load time (the stack-deposit transpiler self-disables with a console warning if the callsite count changes; mastery lookups fall through to "level 0" if the tree name changes, leaving stack-deposit gated as if mastery were never earned). File an issue with the BepInEx console output and wait for a new VGEcho build.
+- **Arrival-snap depends on VGModAPI's travel observation** — it owns no game hook of its own, so it inherits that API's coverage and its runtime-qualification status. VGModAPI's native travel group is still marked experimental.
 - **Booster cadence stays vanilla** — stack-deposit reduces drain to one tick per item *type*, but each tick still waits the vanilla `400/cargoCapacity` seconds between item types. That's intentional: ship-progression (cargo capacity) and the Prompt Engineering skill tree are vanilla's progression hooks for autopilot speed, and bypassing them was the predecessor `FastDeposit` / `FastFetch` features' main flaw — they're now removed.
 
 ## Building from source
 
 Requires .NET SDK 8+. The Makefile targets WSL + a Steam install at `/mnt/c/Program Files (x86)/Steam/steamapps/common/Vanguard Galaxy`; override `GAME_DIR` if your install is elsewhere.
 
+One extra compile-time reference is needed: **`VGModAPI.Abstractions.dll`**, the arrival-snap contract. It is never committed here and never shipped in the VGEcho package — the API plugin owns the one installed copy. `make link-api` symlinks it into `VGEcho/lib/`, defaulting to a sibling API checkout:
+
+```
+../vanguard-galaxy-api/VGModAPI.Abstractions/bin/Release/netstandard2.1/VGModAPI.Abstractions.dll
+```
+
+Build that first (`make build CONFIGURATION=Release` inside the API checkout), or point `VGAPI_DLL` anywhere else:
+
 ```bash
+make build
+make build VGAPI_DLL=/path/to/VGModAPI.Abstractions.dll
+make test                 # asset-free: pure decisions + Cecil metadata over the built DLL
+make check-bindings       # game-compat metadata checks; needs the local install
 make deploy
 # or with a custom install:
 make deploy GAME_DIR="/mnt/d/SteamLibrary/steamapps/common/Vanguard Galaxy"
 ```
 
-This symlinks the game's `Assembly-CSharp.dll` into `VGEcho/lib/` for compile-time references, builds the plugin, and copies the DLL into `<game>/BepInEx/plugins/`.
+`build` symlinks the game's `Assembly-CSharp.dll` and the API contract into `VGEcho/lib/` for compile-time references; `deploy` copies `VGEcho.dll` into `<game>/BepInEx/plugins/`.
 
 ## Releasing (for maintainers)
 
-Creating a GitHub Release auto-builds and uploads the zip via `.github/workflows/release.yml`. CI compiles `VGEcho.dll` against **publicized stubs** committed at `VGEcho/lib/`:
+Creating a GitHub Release auto-builds and uploads the zip via `.github/workflows/release.yml`. Every push and PR additionally runs `.github/workflows/checks.yml` (build + tests, Debug and Release). Both workflows check out the public [VGModAPI](https://github.com/fankserver/vanguard-galaxy-api) repo at a pinned commit and build `VGModAPI.Abstractions` themselves, because that reference is compile-only and not committed here.
+
+CI compiles `VGEcho.dll` against **publicized stubs** committed at `VGEcho/lib/`:
 
 - `Assembly-CSharp.dll` — the game's code
 - `UnityEngine.UI.dll` — uGUI widgets (Toggle, Button) needed by the UI patches

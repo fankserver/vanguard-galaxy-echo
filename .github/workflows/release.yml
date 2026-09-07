@@ -8,6 +8,11 @@ name: Package release
 # live on a public runner, so the repo commits PUBLICIZED stubs (method
 # signatures only, no IL) at VGEcho/lib/. CI compiles against the stubs;
 # the real runtime assemblies take over in-game via Mono's late binding.
+#
+# VGModAPI.Abstractions.dll (the autopilot arrival-snap contract) is the one
+# reference that is NOT committed: it is built here from the public API repo
+# at a pinned commit. It stays compile-only and is never packaged — the API
+# plugin ships and loads its own copy.
 
 on:
   release:
@@ -34,10 +39,24 @@ jobs:
         with:
           ref: ${{ env.TAG }}
 
+      - name: Checkout VGModAPI contract source
+        uses: actions/checkout@v7
+        with:
+          repository: fankserver/vanguard-galaxy-api
+          ref: 497c624ded3fe638833e603746b665f4ce515ea3
+          path: .vgmodapi
+          persist-credentials: false
+
       - name: Setup .NET SDK
         uses: actions/setup-dotnet@v6
         with:
-          dotnet-version: '8.0.x'
+          # 10.0.x satisfies the API checkout's global.json; 8.0.x builds VGEcho.
+          dotnet-version: |
+            8.0.x
+            10.0.x
+
+      - name: Build VGModAPI.Abstractions (compile-only, never packaged)
+        run: dotnet build .vgmodapi/VGModAPI.Abstractions/VGModAPI.Abstractions.csproj -c Release --nologo
 
       - name: Verify publicized references are committed
         run: |
@@ -54,7 +73,9 @@ jobs:
           [ "$missing" = "0" ] || exit 1
 
       - name: Build VGEcho.dll
-        run: dotnet build VGEcho/VGEcho.csproj -c Debug --nologo
+        run: |
+          make build \
+            VGAPI_DLL=.vgmodapi/VGModAPI.Abstractions/bin/Release/netstandard2.1/VGModAPI.Abstractions.dll
 
       - name: Stage release layout
         id: stage
@@ -71,6 +92,13 @@ jobs:
           cp VGEcho/bin/Debug/netstandard2.1/VGEcho.dll "$PKG_DIR/"
           cp README.md "$PKG_DIR/"
           [ -f LICENSE ] && cp LICENSE "$PKG_DIR/" || true
+
+          # Consumers must never bundle a second VGModAPI.Abstractions.dll:
+          # the API plugin owns the one installed copy.
+          if [ -e "$PKG_DIR/VGModAPI.Abstractions.dll" ]; then
+            echo "::error::The package must not contain VGModAPI.Abstractions.dll."
+            exit 1
+          fi
 
           SIZE=$(du -sh "$PKG_DIR" | cut -f1)
           echo "Staged DLL + README — $SIZE at $PKG_DIR"

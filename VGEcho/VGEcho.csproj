@@ -4,9 +4,10 @@
     <TargetFramework>netstandard2.1</TargetFramework>
     <AssemblyName>VGEcho</AssemblyName>
     <Product>Vanguard Galaxy Echo</Product>
-    <Version>0.2.0</Version>
+    <Version>0.7.0</Version>
     <LangVersion>latest</LangVersion>
     <Nullable>enable</Nullable>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <RootNamespace>VGEcho</RootNamespace>
     <RestoreAdditionalProjectSources>
       https://api.nuget.org/v3/index.json;
@@ -46,6 +47,17 @@
          for TMP_Text (the label on toggles and most other UI text in the game). -->
     <Reference Include="Unity.TextMeshPro">
       <HintPath>lib/Unity.TextMeshPro.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <!-- VGModAPI's consumer contract, for the autopilot arrival-snap travel
+         observations. COMPILE-ONLY (Private=false): the API plugin ships and
+         loads this assembly itself, and consumers must never bundle a second
+         copy. Not committed — `make link-api` symlinks it from a sibling API
+         checkout (or from VGAPI_DLL). Reaching any type in it at runtime is
+         confined to VGEcho/Travel/TravelArrivalBridge.cs and its observer, so a
+         player without the API still loads every other VGEcho feature. -->
+    <Reference Include="VGModAPI.Abstractions">
+      <HintPath>lib/VGModAPI.Abstractions.dll</HintPath>
       <Private>false</Private>
     </Reference>
   </ItemGroup>
