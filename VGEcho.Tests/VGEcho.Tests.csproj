@@ -1,0 +1,50 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!-- net8.0 keeps the suite runnable on the 8.x SDK the release workflow
+         installs; the Makefile exports DOTNET_ROLL_FORWARD=LatestMajor so it
+         also runs on a host that only has a newer runtime. -->
+    <TargetFramework>net8.0</TargetFramework>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <RootNamespace>VGEcho.Tests</RootNamespace>
+    <RestoreAdditionalProjectSources>
+      https://api.nuget.org/v3/index.json;
+    </RestoreAdditionalProjectSources>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.*" />
+    <PackageReference Include="xunit" Version="2.*" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.*" />
+    <!-- Reads the built VGEcho.dll and the installed game assembly as METADATA
+         only. Nothing here loads or executes either one. -->
+    <PackageReference Include="Mono.Cecil" Version="0.11.*" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The arrival-snap core is LINKED, not project-referenced: referencing
+         VGEcho.csproj would drag in BepInEx, UnityEngine and the publicized
+         game stub, and these tests must stay runnable on a bare .NET host.
+         Every file below is deliberately free of Unity and BepInEx types. -->
+    <Compile Include="..\VGEcho\Travel\ArrivalSnapFacts.cs" Link="Core\ArrivalSnapFacts.cs" />
+    <Compile Include="..\VGEcho\Travel\ArrivalSnapReducer.cs" Link="Core\ArrivalSnapReducer.cs" />
+    <Compile Include="..\VGEcho\Travel\ArrivalSnapBinding.cs" Link="Core\ArrivalSnapBinding.cs" />
+    <Compile Include="..\VGEcho\Travel\ArrivalSnapApplyGuard.cs" Link="Core\ArrivalSnapApplyGuard.cs" />
+    <Compile Include="..\VGEcho\Travel\IArrivalSnapObserver.cs" Link="Core\IArrivalSnapObserver.cs" />
+    <Compile Include="..\VGEcho\Travel\TravelArrivalObserver.cs" Link="Core\TravelArrivalObserver.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Private=true, unlike the plugin: xUnit needs the contract types live to
+         construct TravelTransition facts. The deployed plugin still ships
+         nothing but VGEcho.dll. -->
+    <Reference Include="VGModAPI.Abstractions">
+      <HintPath>..\VGEcho\lib\VGModAPI.Abstractions.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+  </ItemGroup>
+
+</Project>

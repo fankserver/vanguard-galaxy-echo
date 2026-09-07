@@ -21,11 +21,19 @@ obj/
 # committed DLL carries only type metadata — no game logic, no Unity runtime
 # code. Running the tool WITHOUT --strip leaves the full proprietary IL intact,
 # which we can't legally redistribute.
+#
+# VGModAPI.Abstractions.dll is NOT committed: it is a compile-only symlink
+# created by `make link-api` from a sibling API checkout (or VGAPI_DLL), and the
+# API plugin ships the one installed runtime copy.
 VGEcho/lib/*.dll
 VGEcho/lib/*.pdb
 !VGEcho/lib/Assembly-CSharp.dll
 !VGEcho/lib/UnityEngine.UI.dll
 !VGEcho/lib/Unity.TextMeshPro.dll
+
+# CI-only checkout of the public VGModAPI repo, used to build the compile-only
+# VGModAPI.Abstractions.dll contract reference. Never committed.
+.vgmodapi/
 
 # Local overrides
 *.local

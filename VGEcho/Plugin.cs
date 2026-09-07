@@ -1,20 +1,29 @@
+using System;
 using System.Linq;
 using BepInEx;
+using BepInEx.Bootstrap;
 using BepInEx.Configuration;
 using BepInEx.Logging;
 using HarmonyLib;
+using VGEcho.Travel;
 
 namespace VGEcho;
 
 [BepInPlugin(PluginGuid, PluginName, PluginVersion)]
 [BepInProcess("VanguardGalaxy.exe")]
+// Soft, because arrival-snap is one feature out of eight: a missing API must not
+// stop VGEcho from loading. It still orders the API's Awake before ours when it
+// IS installed, which is what makes ModApi.Travel readable below. The id is the
+// literal VGModAPI publishes as ModApi.PluginId; ArrivalSnapBindingTests pins the
+// two together so a rename cannot silently turn this into a dead dependency.
+[BepInDependency(ArrivalSnapBinding.ApiPluginId, BepInDependency.DependencyFlags.SoftDependency)]
 public class Plugin : BaseUnityPlugin
 {
     public const string PluginGuid = "vgecho";
     public const string PluginName = "Vanguard Galaxy Echo";
     // BepInEx parses PluginVersion through System.Version which rejects SemVer
     // pre-release suffixes, so stick to the plain N.N.N form.
-    public const string PluginVersion = "0.6.1";
+    public const string PluginVersion = "0.7.0";
 
     internal static Plugin Instance { get; private set; } = null!;
     internal static ManualLogSource Log { get; private set; } = null!;
@@ -33,6 +42,12 @@ public class Plugin : BaseUnityPlugin
 
     private Harmony _harmony = null!;
 
+    /// <summary>The VGModAPI travel subscription, or null when arrival-snap is
+    /// unavailable. Typed as VGEcho's own interface: no plugin field may name a
+    /// <c>VGModAPI.Abstractions</c> type, or loading this class would fail
+    /// outright when the API is not installed.</summary>
+    private IArrivalSnapObserver? _arrivalSnap;
+
     private void Awake()
     {
         Instance = this;
@@ -47,9 +62,12 @@ public class Plugin : BaseUnityPlugin
             "loop. The Autopilot side-tab's green fill circle becomes a travel-progress " +
             "indicator that completes exactly on drop-out. Requires TimingEnabled.");
         CfgAutopilotArrivalSnap = Config.Bind("Autopilot", "ArrivalSnap", true,
-            "When the ship reaches its final waypoint, zero the IdleManager cycle timer so the " +
+            "When the ship completes its final route, zero the IdleManager cycle timer so the " +
             "next task fires on the following Update tick instead of waiting up to 12s. Covers " +
-            "jump-gate transitions where ETA is unavailable. Requires TimingEnabled.");
+            "jump-gate transitions where ETA is unavailable. Requires TimingEnabled, and requires " +
+            "VGModAPI " + ArrivalSnapBinding.MinimumApiVersion + " or newer with [Travel] Enabled = true: the arrival " +
+            "fact comes from that API's verified RouteCompleted observation. Without it this " +
+            "toggle does nothing and no direct game hook is installed instead.");
         CfgAutopilotStackDepositMode = Config.Bind("Autopilot", "StackDepositMode", Patches.StackDepositMode.Tiered,
             new ConfigDescription(
                 "Controls how each autopilot deposit cycle moves cargo (non-ammo / non-currency " +
@@ -125,11 +143,90 @@ public class Plugin : BaseUnityPlugin
         _harmony.PatchAll(typeof(Patches.AutopilotUIPatches));
         _harmony.PatchAll(typeof(Patches.AutopilotLbrtrPatches));
         _harmony.PatchAll(typeof(Patches.AutopilotSafeCrackerPatches));
+        BindArrivalSnap();
         Log.LogInfo($"{PluginName} v{PluginVersion} loaded ({_harmony.GetPatchedMethods().Count()} patches)");
+    }
+
+    /// <summary>
+    /// Binds arrival-snap to VGModAPI's travel observations, or explains why it
+    /// stays off. Every API type is reached through
+    /// <see cref="TravelArrivalBridge"/>'s no-inline methods inside this
+    /// <c>try</c>, so a missing or broken API assembly costs exactly this one
+    /// feature and never the plugin's startup.
+    /// </summary>
+    private void BindArrivalSnap()
+    {
+        var apiVersion = InstalledApiVersion();
+        var admission = ArrivalSnapAdmission.ApiAbsent;
+        try
+        {
+            if (apiVersion != null)
+            {
+                admission = TravelArrivalBridge.Admit(apiVersion);
+                if (admission == ArrivalSnapAdmission.Admitted)
+                {
+                    _arrivalSnap = TravelArrivalBridge.Subscribe(
+                        Patches.AutopilotTimingPatches.ReadArrivalSnapGates,
+                        Patches.AutopilotTimingPatches.ApplyArrivalSnap,
+                        message => Log.LogDebug(message),
+                        message => Log.LogError(message));
+                }
+            }
+        }
+        catch (Exception failure)
+        {
+            _arrivalSnap = null;
+            Log.LogError("VGModAPI travel binding failed, so autopilot arrival-snap is disabled. ETA-sync " +
+                "and every other VGEcho feature are unaffected, and no direct TravelManager hook is " +
+                "installed as a fallback: " + failure.GetType().Name + ": " + failure.Message);
+            return;
+        }
+
+        if (_arrivalSnap != null)
+        {
+            Log.LogInfo("Autopilot arrival-snap bound to VGModAPI " + apiVersion + " travel events.");
+        }
+        else if (ArrivalSnapBinding.LevelFor(admission) == ArrivalSnapLogLevel.Info)
+        {
+            Log.LogInfo(ArrivalSnapBinding.Explain(admission));
+        }
+        else
+        {
+            Log.LogWarning(ArrivalSnapBinding.Explain(admission));
+        }
+    }
+
+    /// <summary>Version of the installed VGModAPI plugin, or null when it is not
+    /// loaded. Reading <see cref="Chainloader"/> touches no API type, so the
+    /// absent case never JITs anything that could fail to resolve.</summary>
+    private static Version? InstalledApiVersion()
+    {
+        try
+        {
+            return Chainloader.PluginInfos != null
+                   && Chainloader.PluginInfos.TryGetValue(ArrivalSnapBinding.ApiPluginId, out var api)
+                ? api.Metadata.Version
+                : null;
+        }
+        catch
+        {
+            // Chainloader is not initialized outside a BepInEx process.
+            return null;
+        }
     }
 
     private void OnDestroy()
     {
+        try
+        {
+            _arrivalSnap?.Dispose();
+        }
+        catch (Exception failure)
+        {
+            Log?.LogError("Disposing the VGModAPI travel subscription failed: "
+                + failure.GetType().Name + ": " + failure.Message);
+        }
+        _arrivalSnap = null;
         _harmony?.UnpatchSelf();
     }
 }

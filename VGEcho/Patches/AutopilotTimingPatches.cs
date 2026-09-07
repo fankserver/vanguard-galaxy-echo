@@ -8,14 +8,19 @@ using UnityEngine;
 namespace VGEcho.Patches;
 
 /// <summary>
-/// Patches on <see cref="IdleManager"/> and <see cref="TravelManager"/> that align
-/// the autopilot "next-task" cycle with space-travel arrival. Two mechanisms:
+/// Autopilot cycle timing. Two mechanisms, one shared master toggle:
 ///   • <b>ETA-sync</b> (postfix on <c>IdleManager.Update</c>): while the ship is
 ///     warping, overwrite <c>updateTimer</c>/<c>updateTimerBase</c> with the live
 ///     travel ETA so the green progress circle visibly completes on drop-out.
-///   • <b>Arrival-snap</b> (postfix on <c>TravelManager.TravelToNextWaypoint</c>):
-///     when the final waypoint is reached, zero <c>updateTimer</c> so the next
+///   • <b>Arrival-snap</b> (<see cref="ApplyArrivalSnap"/>): when a genuine final
+///     route completes, zero <c>updateTimer</c> so the next
 ///     <c>IdleManager.Update</c> tick immediately triggers <c>FindActivity</c>.
+///
+/// Arrival-snap owns no Harmony patch. Its trigger is VGModAPI's public
+/// <c>ITravelEvents.RouteCompleted</c> fact, delivered through
+/// <see cref="Travel.TravelArrivalObserver"/>; see
+/// <see cref="Travel.ArrivalSnapReducer"/> for why that is the same native
+/// boundary the retired <c>TravelManager.TravelToNextWaypoint</c> postfix used.
 ///
 /// Both engage only when <c>GamePlayer.current.autoPlay</c> is true and the
 /// matching config entry is enabled. Private setters on <c>IdleManager</c>'s
@@ -39,42 +44,73 @@ internal static class AutopilotTimingPatches
     private static bool _wasSyncing;
 
     /// <summary>
-    /// Postfix on <see cref="TravelManager.TravelToNextWaypoint"/>. The game
-    /// invokes this at the end of every leg of a journey: if more waypoints
-    /// remain, it starts the next leg; if the list is empty, travel ended.
-    /// In the empty-list case, and only when the player is on autopilot, we
-    /// zero <c>updateTimer</c> so the very next <see cref="IdleManager.Update"/>
-    /// tick calls <c>FindActivity</c> — eliminating the residual 0–12s wait
-    /// between drop-out and the next autonomous action.
+    /// Echo's own arrival-snap gates, read live when a travel fact arrives:
+    /// the master timing toggle, the arrival-snap toggle and whether the player
+    /// is actually on autopilot. Same three conditions the retired
+    /// <c>TravelToNextWaypoint</c> postfix checked first, in the same order.
     /// </summary>
-    [HarmonyPostfix]
-    [HarmonyPatch(typeof(TravelManager), nameof(TravelManager.TravelToNextWaypoint))]
-    private static void TravelToNextWaypoint_Postfix()
+    internal static Travel.ArrivalSnapGates ReadArrivalSnapGates()
     {
-        if (!Plugin.Instance.CfgAutopilotTiming.Value) return;
-        if (!Plugin.Instance.CfgAutopilotArrivalSnap.Value) return;
-
         var player = GamePlayer.current;
-        if (player == null || !player.autoPlay) return;
+        return new Travel.ArrivalSnapGates(
+            Plugin.Instance.CfgAutopilotTiming.Value,
+            Plugin.Instance.CfgAutopilotArrivalSnap.Value,
+            player != null && player.autoPlay);
+    }
 
-        // The final-leg branch of TravelToNextWaypoint runs when waypoints is
-        // empty and sets travelCoroutine = null. Guard on both so we don't
-        // fire mid-journey between legs of a multi-jump trip.
-        if (player.waypoints.Count != 0) return;
+    /// <summary>
+    /// Zeroes <c>IdleManager.updateTimer</c> so the very next
+    /// <see cref="IdleManager.Update"/> tick drops it below zero and calls
+    /// <c>FindActivity</c> — eliminating the residual 0–12s wait between
+    /// drop-out and the next autonomous action.
+    ///
+    /// <para>Called only from the API's <c>RouteCompleted</c> callback, which
+    /// the API dispatches synchronously from its postfix on the same native
+    /// <c>TravelManager.TravelToNextWaypoint</c> call Echo used to patch. That
+    /// is the coroutine phase of the frame, after every <c>Update</c>, so the
+    /// zeroed timer is observed by the next frame's idle decision exactly as
+    /// before.</para>
+    ///
+    /// <para>The two native conditions the retired postfix checked at WRITE time
+    /// — an empty <c>waypoints</c> list and the full <c>TravelActive()</c>,
+    /// which also reports true for an in-flight jump-gate hop — are re-read here
+    /// rather than trusted from the fact. The API validates them when it emits,
+    /// but its hub dispatches subscribers synchronously, so a subscriber ahead
+    /// of Echo can start a new route inside the same callback chain.
+    /// <see cref="Travel.ArrivalSnapApplyGuard"/> owns that decision so both
+    /// gates are unit-tested; everything unreadable fails closed.</para>
+    ///
+    /// <para><see cref="Singleton{T}.Current"/>, not <c>Instance</c>: the latter
+    /// runs <c>FindAnyObjectByType</c> and caches the result into the shared
+    /// static when the field is empty. A pure read of the managers the game
+    /// already registered is enough here, and it cannot seed that cache with an
+    /// object found during a scene transition. A missing or destroyed manager
+    /// (Unity fake-null) simply leaves the vanilla cycle running.</para>
+    /// </summary>
+    internal static void ApplyArrivalSnap()
+    {
+        var idle = Singleton<IdleManager>.Current;
+        var player = GamePlayer.current;
+        var travel = Singleton<TravelManager>.Current;
+        var waypoints = player != null ? player.waypoints : null;
 
-        var idle = Singleton<IdleManager>.Instance;
-        if (idle == null) return;
+        var decision = Travel.ArrivalSnapApplyGuard.Evaluate(new Travel.NativeTravelState(
+            idleManagerLive: idle != null,
+            playerLive: player != null,
+            travelManagerLive: travel != null,
+            remainingWaypoints: waypoints != null ? waypoints.Count : -1,
+            travelActive: travel != null && travel.TravelActive()));
 
-        // TravelActive() also consults usingJumpgate. If a jump-gate coroutine
-        // is still in flight (it calls TravelToNextWaypoint as its last line),
-        // wait for it to finalize rather than firing early. In practice
-        // TravelActive is already false by the time the postfix runs because
-        // the orig method set travelCoroutine = null and usingJumpgate was
-        // cleared before this invocation — but belt-and-braces.
-        if (Singleton<TravelManager>.Instance.TravelActive()) return;
+        if (decision != Travel.ArrivalSnapApply.WriteTimer)
+        {
+            Plugin.Log.LogDebug("[autopilot-timing] arrival-snap skipped at write time: " + decision);
+            return;
+        }
 
         Plugin.Log.LogDebug("[autopilot-timing] arrival-snap: zeroing updateTimer");
-        UpdateTimerRef(idle) = 0f;
+        // WriteTimer is only returned for IdleManagerLive, which is this very
+        // reference having passed Unity's null operator above.
+        UpdateTimerRef(idle!) = 0f;
     }
 
     /// <summary>

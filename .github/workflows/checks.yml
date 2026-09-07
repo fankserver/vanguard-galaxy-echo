@@ -1,16 +1,11 @@
-name: Compatibility checks
+name: Checks
 
-# Asset-free build + game-compatibility regression suite. Compiles VGEcho.dll
-# against the publicized stubs committed at VGEcho/lib/ and runs
-# VGEcho.Compatibility.Tests: the linked native-Remove binding helper against
-# synthetic inventories, plus Cecil metadata/IL checks over the freshly built
-# DLL. Nothing here loads Unity, BepInEx or the game.
+# Asset-free build + test. Compiles VGEcho.dll against the publicized stubs
+# committed at VGEcho/lib/ and runs the arrival-snap suite: pure reducer and
+# binding decisions plus Cecil metadata checks over the freshly built DLL.
 #
-# Since 0.7.0 the plugin also needs VGModAPI's compile-only contract, so this
-# workflow provisions it exactly the way checks.yml and release.yml do.
-#
-# The checks that read the ORIGINAL installed Assembly-CSharp.dll are tagged
-# Category=InstalledGame and stay local — `make compat-check-bindings`.
+# The installed-game compatibility checks (Category=InstalledGame) need the
+# original Assembly-CSharp.dll and stay local — `make check-bindings`.
 
 on:
   pull_request:
@@ -22,12 +17,12 @@ permissions:
   contents: read
 
 concurrency:
-  group: compat-checks-${{ github.workflow }}-${{ github.ref }}
+  group: checks-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  compat:
-    name: Compatibility (${{ matrix.configuration }})
+  build-and-test:
+    name: Build and test (${{ matrix.configuration }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -54,8 +49,9 @@ jobs:
         with:
           # The API checkout pins SDK 10.0.111 with rollForward: latestPatch,
           # which only accepts 10.0.1xx patches - a floating 10.0.x resolves to a
-          # different feature band and does NOT satisfy it. Install that exact
-          # version; 8.0.x is what VGEcho and its test suites use.
+          # different feature band (10.0.400 at time of writing) and does NOT
+          # satisfy it. Install that exact version so the contract is built the
+          # way its own repo declares. 8.0.x is what VGEcho and VGEcho.Tests use.
           dotnet-version: |
             8.0.x
             10.0.111
@@ -74,8 +70,11 @@ jobs:
             test -s "VGEcho/lib/$stub" || { echo "::error::VGEcho/lib/$stub is missing or empty."; exit 1; }
           done
 
-      - name: Build and run compatibility tests
+      # Also asserts, through PluginAssemblyShapeTests, that the built DLL keeps
+      # every VGModAPI token off the always-JIT plugin members and ships no copy
+      # of the API assembly.
+      - name: Build and test
         run: |
-          make compat-test \
+          make test \
             CONFIG=${{ matrix.configuration }} \
             VGAPI_DLL=.vgmodapi/VGModAPI.Abstractions/bin/Release/netstandard2.1/VGModAPI.Abstractions.dll
