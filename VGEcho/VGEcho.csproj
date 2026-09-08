@@ -3,7 +3,7 @@
   <PropertyGroup>
     <TargetFramework>netstandard2.1</TargetFramework>
     <AssemblyName>VGEcho</AssemblyName>
-    <Product>Vanguard Galaxy Echo</Product>
+    <Product>Echo</Product>
     <Version>0.7.0</Version>
     <LangVersion>latest</LangVersion>
     <Nullable>enable</Nullable>
