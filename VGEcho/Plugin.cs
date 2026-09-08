@@ -20,7 +20,7 @@ namespace VGEcho;
 public class Plugin : BaseUnityPlugin
 {
     public const string PluginGuid = "vgecho";
-    public const string PluginName = "Vanguard Galaxy Echo";
+    public const string PluginName = "Echo";
     // BepInEx parses PluginVersion through System.Version which rejects SemVer
     // pre-release suffixes, so stick to the plain N.N.N form.
     public const string PluginVersion = "0.7.0";

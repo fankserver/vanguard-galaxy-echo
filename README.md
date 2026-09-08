@@ -1,4 +1,4 @@
-# Vanguard Galaxy Echo (VGEcho)
+# Echo (VGEcho)
 
 A BepInEx plugin for [Vanguard Galaxy](https://store.steampowered.com/app/3471800/) that enhances ECHO — the in-game autopilot AI. Surgical changes to where vanilla's per-tick autopilot loop creates avoidable friction, without bulldozing the Prompt Engineering skill tree's intentional cadence costs.
 
@@ -30,7 +30,7 @@ Built and verified against **Vanguard Galaxy 0.8.2.3**. Game 0.8.2 reshaped `Inv
    ```
 5. **Launch the game.** Open the BepInEx console — you should see a load line ending with the number of Harmony patches applied, e.g.:
    ```
-   [Info :Vanguard Galaxy Echo] Vanguard Galaxy Echo v0.4.0 loaded (7 patches)
+   [Info :Echo] Echo v0.4.0 loaded (7 patches)
    ```
 
 ## Uninstall
