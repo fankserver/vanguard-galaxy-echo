@@ -32,7 +32,7 @@ public sealed class ShapeScanRegressionTests
             Assembly = AssemblyDefinition.CreateAssembly(
                 new AssemblyNameDefinition("SyntheticConsumer", new Version(1, 0)), "SyntheticConsumer", ModuleKind.Dll);
             Module = Assembly.MainModule;
-            var scope = new AssemblyNameReference(ApiAssembly, new Version(0, 1, 9));
+            var scope = new AssemblyNameReference(ApiAssembly, new Version(0, 2, 8));
             Module.AssemblyReferences.Add(scope);
             ApiType = new TypeReference("VGModAPI", "TravelTransition", Module, scope);
         }
@@ -78,8 +78,8 @@ public sealed class ShapeScanRegressionTests
         using var synthetic = new Synthetic();
         var implementer = synthetic.AddType("ImplementsApi");
         implementer.Interfaces.Add(new InterfaceImplementation(
-            new TypeReference("VGModAPI", "ITravelEvents", synthetic.Module, synthetic.ApiType.Scope)));
-        Assert.Contains(Scan(implementer), finding => finding.Contains("implements") && finding.Contains("ITravelEvents"));
+            new TypeReference("VGModAPI", "ITravelService", synthetic.Module, synthetic.ApiType.Scope)));
+        Assert.Contains(Scan(implementer), finding => finding.Contains("implements") && finding.Contains("ITravelService"));
     }
 
     /// <summary>A generic method's type argument lives on the CALL SITE, so it

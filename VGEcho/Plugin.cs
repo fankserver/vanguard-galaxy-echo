@@ -13,7 +13,7 @@ namespace VGEcho;
 [BepInProcess("VanguardGalaxy.exe")]
 // Soft, because arrival-snap is one feature out of eight: a missing API must not
 // stop VGEcho from loading. It still orders the API's Awake before ours when it
-// IS installed, which is what makes ModApi.Travel readable below. The id is the
+// IS installed, which is what makes ModApi.Services.Travel readable below. The id is the
 // literal VGModAPI publishes as ModApi.PluginId; ArrivalSnapBindingTests pins the
 // two together so a rename cannot silently turn this into a dead dependency.
 [BepInDependency(ArrivalSnapBinding.ApiPluginId, BepInDependency.DependencyFlags.SoftDependency)]
@@ -65,8 +65,9 @@ public class Plugin : BaseUnityPlugin
             "When the ship completes its final route, zero the IdleManager cycle timer so the " +
             "next task fires on the following Update tick instead of waiting up to 12s. Covers " +
             "jump-gate transitions where ETA is unavailable. Requires TimingEnabled, and requires " +
-            "VGModAPI " + ArrivalSnapBinding.MinimumApiVersion + " or newer with [Travel] Enabled = true: the arrival " +
-            "fact comes from that API's verified RouteCompleted observation. Without it this " +
+            "VGModAPI " + ArrivalSnapBinding.MinimumApiVersion + " to below " + ArrivalSnapBinding.FirstUnsupportedApiVersion +
+            " with [Travel] Enabled = true: the arrival " +
+            "fact comes from that API's verified RouteCompleted travel observation. Without it this " +
             "toggle does nothing and no direct game hook is installed instead.");
         CfgAutopilotStackDepositMode = Config.Bind("Autopilot", "StackDepositMode", Patches.StackDepositMode.Tiered,
             new ConfigDescription(
@@ -184,7 +185,7 @@ public class Plugin : BaseUnityPlugin
 
         if (_arrivalSnap != null)
         {
-            Log.LogInfo("Autopilot arrival-snap bound to VGModAPI " + apiVersion + " travel events.");
+            Log.LogInfo("Autopilot arrival-snap bound to VGModAPI " + apiVersion + " travel observations.");
         }
         else if (ArrivalSnapBinding.LevelFor(admission) == ArrivalSnapLogLevel.Info)
         {

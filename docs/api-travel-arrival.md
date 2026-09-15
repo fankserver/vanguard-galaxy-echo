@@ -4,7 +4,7 @@ Arrival-snap zeroes `IdleManager.updateTimer` when a route genuinely finishes, s
 the autopilot's next decision runs on the following frame instead of up to 12 s
 later. Until 0.7.0 it did that from its own Harmony postfix on
 `TravelManager.TravelToNextWaypoint`. It now consumes VGModAPI's public
-`ITravelEvents` `RouteCompleted` fact instead, and owns no travel hook at all.
+`ITravelService.Transitioned` `RouteCompleted` fact instead, and owns no travel hook at all.
 
 ETA-sync is a separate feature and is unchanged: it keeps its own postfix on
 `IdleManager.Update` and its own distance math.
@@ -142,8 +142,9 @@ absent too, and Mono resolves a method's type tokens when it *compiles* that
 method — before any `try` inside it can catch anything. So:
 
 - no field, parameter or return type on a plugin member names an API type;
-- every API token lives in `TravelArrivalBridge` (two `[MethodImpl(NoInlining)]`
-  entry points) and `TravelArrivalObserver`;
+- every API token lives in `TravelArrivalBridge` (two public
+  `[MethodImpl(NoInlining)]` entry points plus a private no-inline availability
+  reader) and `TravelArrivalObserver`;
 - `Plugin.Awake` checks `Chainloader.PluginInfos` for `vgmodapi` first and only
   calls into the bridge inside a `try` when the plugin is actually loaded.
 
@@ -152,10 +153,17 @@ any other type acquires an API reference, if either bridge entry point loses
 `NoInlining`, or if the build output ever contains a copy of the API assembly.
 
 Admission (`ArrivalSnapBinding.Evaluate`) requires an installed version in
-`[0.1.9, 0.2.0)`, a non-null `ModApi.Travel`, and the API reporting its
-`native-travel` capability as available. Anything else logs a specific reason and
-leaves arrival-snap off. There is no fallback to a direct `TravelManager` hook,
-and no other VGEcho feature is affected.
+`[0.2.8, 0.3.0)` and a travel service (`ModApi.Services.Travel`, always non-null
+once published) whose `Availability` reports `IsAvailable`. Distinct refusals —
+services never published or already cleared, the group disabled via
+`[Travel] Enabled = false`, an environmental unavailability (unsupported game,
+failed binding, missing dependency), or terminal `ObserverFault` / `ApiStopped`
+health — each log their own reason and leave arrival-snap off. The observer
+itself registers its `Transitioned` and `AvailabilityChanged` handlers before
+reading the current availability (registration does not replay); non-terminal
+unavailability pauses deciding and can return, while terminal health latches the
+observer off for the process lifetime. There is no fallback to a direct
+`TravelManager` hook, and no other VGEcho feature is affected.
 
 ## Status
 

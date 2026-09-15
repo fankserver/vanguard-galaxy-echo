@@ -13,11 +13,19 @@ PLUGIN_DIR := $(GAME_DIR)/BepInEx/plugins/VGEcho
 # bridge. COMPILE-ONLY: the API plugin ships and loads this assembly itself, so
 # it is never committed here and never copied into the VGEcho package.
 #
-# The default is the sibling API checkout, the layout every plugin in this
-# workspace uses. Override it when the API lives elsewhere:
+# The default is the EXTRACTED ASSET OF THE PUBLISHED v0.2.8 PRERELEASE — the
+# exact stamp admission is tested against. Fetch it once with:
+#   mkdir -p ../vanguard-galaxy-api/artifacts/releases/v0.2.8
+#   cd ../vanguard-galaxy-api/artifacts/releases/v0.2.8
+#   gh release download v0.2.8 --repo fankserver/vanguard-galaxy-api \
+#     --pattern 'VGModAPI-0.2.8-stable.zip*'
+#   sha256sum -c VGModAPI-0.2.8-stable.zip.sha256
+#   unzip -j VGModAPI-0.2.8-stable.zip VGModAPI/VGModAPI.Abstractions.dll
+# Never build against a stale sibling bin/Release stamp: ArrivalSnapBindingTests
+# asserts the linked assembly is exactly 0.2.8. Override when it lives elsewhere:
 #   make build VGAPI_DLL=/path/to/VGModAPI.Abstractions.dll
-# Build it in the API checkout with `make build CONFIGURATION=Release` first.
-VGAPI_DLL ?= ../vanguard-galaxy-api/VGModAPI.Abstractions/bin/Release/netstandard2.1/VGModAPI.Abstractions.dll
+# (then delete VGEcho/lib/VGModAPI.Abstractions.dll to repoint the link).
+VGAPI_DLL ?= ../vanguard-galaxy-api/artifacts/releases/v0.2.8/VGModAPI.Abstractions.dll
 
 # Resolve dotnet — prefer explicit local SDK, fall back to PATH
 DOTNET   ?= $(shell command -v dotnet 2>/dev/null || echo /tmp/dnsdk/dotnet/dotnet)
