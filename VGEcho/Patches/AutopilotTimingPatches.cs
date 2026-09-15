@@ -17,7 +17,7 @@ namespace VGEcho.Patches;
 ///     <c>IdleManager.Update</c> tick immediately triggers <c>FindActivity</c>.
 ///
 /// Arrival-snap owns no Harmony patch. Its trigger is VGModAPI's public
-/// <c>ITravelEvents.RouteCompleted</c> fact, delivered through
+/// <c>ITravelService.Transitioned</c> <c>RouteCompleted</c> fact, delivered through
 /// <see cref="Travel.TravelArrivalObserver"/>; see
 /// <see cref="Travel.ArrivalSnapReducer"/> for why that is the same native
 /// boundary the retired <c>TravelManager.TravelToNextWaypoint</c> postfix used.

@@ -3,7 +3,7 @@
 A BepInEx plugin for [Vanguard Galaxy](https://store.steampowered.com/app/3471800/) that enhances ECHO — the in-game autopilot AI. Surgical changes to where vanilla's per-tick autopilot loop creates avoidable friction, without bulldozing the Prompt Engineering skill tree's intentional cadence costs.
 
 - **ETA-sync** — while the ship is warping, the Autopilot side-tab's green progress circle tracks live distance-based travel progress instead of the vanilla 12 s loop. Completes exactly on drop-out.
-- **Arrival-snap** *(needs [VGModAPI](https://github.com/fankserver/vanguard-galaxy-api) 0.1.9+)* — on completing the final route, the next autonomous action fires on the following frame instead of after a 0–12 s residual wait. Driven by VGModAPI's verified `RouteCompleted` travel observation, not by a hook of our own. Without the API this one feature stays off and everything else works unchanged.
+- **Arrival-snap** *(needs [VGModAPI](https://github.com/fankserver/vanguard-galaxy-api) 0.2.8–0.2.x)* — on completing the final route, the next autonomous action fires on the following frame instead of after a 0–12 s residual wait. Driven by VGModAPI's verified `RouteCompleted` travel observation, not by a hook of our own. Without the API this one feature stays off and everything else works unchanged.
 - **Stack deposit** — each deposit cycle moves the full stack of an item type instead of one unit. Cycle cadence is unchanged (still `400/cargoCapacity` seconds, still gated by ship-progression and the Prompt Engineering skill tree), so a diverse 200-unit hold drains in *one tick per item type* instead of one per unit. Ammo and currency keep their vanilla per-cycle batches.
 - **Refinery routing** *(opt-in)* — when the autopilot would fly home with ore in cargo and home has no refinery, divert to the nearest friendly station with one. Saves the round-trip when mining far from base.
 - **Auto-refine on arrival** *(opt-in)* — when the autopilot docks at a station with a refinery, flip that refinery's Auto-Refine toggle on so pending ore refines passively while you're there.
@@ -45,7 +45,7 @@ BepInEx writes the config to `BepInEx/config/vgecho.cfg` on first launch. All to
 | ------------------ | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `TimingEnabled`    | `true`  | Master toggle for `EtaSync` and `ArrivalSnap`. When `false`, both are skipped and the vanilla 12 s cycle runs unchanged. Does not affect `StackDeposit`.                                      |
 | `EtaSync`          | `true`  | While warping, drive the cycle from distance-based travel progress. Fill circle completes exactly on drop-out.                                                                                |
-| `ArrivalSnap`      | `true`  | On genuine final-route completion, zero the cycle so the next autonomous action fires immediately. Additionally requires VGModAPI 0.1.9–0.1.x with `[Travel] Enabled = true`; without it the toggle does nothing and no game hook is installed in its place. |
+| `ArrivalSnap`      | `true`  | On genuine final-route completion, zero the cycle so the next autonomous action fires immediately. Additionally requires VGModAPI 0.2.8 up to (excluding) 0.3.0 with `[Travel] Enabled = true`; without it the toggle does nothing and no game hook is installed in its place. |
 | `StackDepositMode` | `Tiered`  | Controls how each autopilot deposit cycle moves cargo. `Off` = vanilla 1 unit/tick. `Tiered` = mastery-driven progression curve mirroring vanilla's `milestonesMastery` cadence (see table below). `Always` = full stack from level 0 (pure QoL override). Cycle cadence is unchanged in all modes. Independent of `TimingEnabled`. |
 
 `Tiered` progression table:
@@ -80,7 +80,7 @@ Disable any feature independently — no rebuild needed, just relaunch the game.
 - Confirm `TimingEnabled = true` and the individual feature toggle is `true` in `vgecho.cfg`.
 
 **Arrival-snap does nothing but the rest of VGEcho works**
-- That is the designed degraded state. VGEcho logs the exact reason at startup: VGModAPI not installed (logged at Info — an optional dependency being absent is not a problem), or, at Warning, its version outside `0.1.9`–`0.1.x`, no travel service (`[Travel] Enabled = false` in `vgmodapi.cfg`), or the API reporting its `native-travel` capability as unavailable.
+- That is the designed degraded state. VGEcho logs the exact reason at startup: VGModAPI not installed (logged at Info — an optional dependency being absent is not a problem), or, at Warning, its version outside `0.2.8`–`0.2.x`, its services never published (or already shut down), the travel group disabled (`[Travel] Enabled = false` in `vgmodapi.cfg`), or the travel service reporting itself unavailable (unsupported game, failed binding, missing dependency, or a terminal observer fault / API stop).
 - There is deliberately no fallback: VGEcho will not hook `TravelManager` itself when the API is unavailable. See [docs/api-travel-arrival.md](docs/api-travel-arrival.md).
 
 **`TypeInitializationException` on load**
